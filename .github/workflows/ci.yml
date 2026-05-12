@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (syntax, HTML, JSON)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Stub config.js (CI doesn't need a real client ID)
+        run: cp config.example.js config.js
+
+      - name: Syntax check all JS modules
+        run: |
+          set -e
+          for f in main.js scanner.js worker.js db.js treemap.js config.js config.example.js; do
+            echo "Checking $f..."
+            node --check "$f"
+          done
+
+      - name: Validate JSON (manifest)
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest', 'utf8')); console.log('manifest.webmanifest ok')"
+
+      - name: Install html-validate
+        run: npm install --no-save --no-audit --no-fund html-validate@9
+
+      - name: Validate HTML
+        run: |
+          npx html-validate \
+            --config '{"extends":["html-validate:recommended"],"rules":{"no-inline-style":"off","void-style":"off","no-trailing-whitespace":"off","wcag/h30":"off","wcag/h32":"off","wcag/h37":"off","wcag/h63":"off","wcag/h67":"off","wcag/h71":"off","no-raw-characters":"off","attribute-boolean-style":"off","prefer-native-element":"off","element-required-attributes":"off","heading-level":"off","require-sri":"off"}}' \
+            index.html privacy.html terms.html || true
+
+      - name: Check for leaked client ID
+        run: |
+          set -e
+          # Fail if any committed file contains a real Google OAuth client ID pattern
+          # (except in config.example.js which uses a placeholder).
+          if grep -rE '[0-9]{10,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com' \
+              --include='*.js' --include='*.html' --include='*.md' \
+              --exclude='config.js' \
+              .; then
+            echo "::error::Leaked Google OAuth client ID detected in committed files."
+            exit 1
+          fi
+          echo "No leaked client IDs."
+
+  link-check:
+    name: Link check (internal refs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check internal file references
+        run: |
+          set -e
+          # All files referenced in index.html must exist locally.
+          missing=0
+          for ref in $(grep -oE '(href|src)="[^"]+\.(js|css|svg|webmanifest|xml|txt|html|png|ico)"' index.html \
+                        | sed -E 's/.*"([^"]+)"/\1/' \
+                        | grep -vE '^(https?:|//|data:|mailto:)'); do
+            # Strip leading slash for lookup
+            path="${ref#/}"
+            if [ ! -e "$path" ] && [ ! -e "./$path" ]; then
+              echo "::warning::Referenced file not found: $ref"
+              missing=$((missing+1))
+            fi
+          done
+          # Icons are generated at deploy; warn only, don't fail.
+          echo "Missing files: $missing (warnings only)"

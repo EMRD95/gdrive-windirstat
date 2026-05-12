@@ -1,0 +1,57 @@
+# === Secrets / local config ===
+config.js
+.env
+.env.*
+!.env.example
+
+# === Deployment ===
+# Production build of config.js is injected by CI from a GitHub secret;
+# never commit a real client ID.
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Editors ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === Node (if ever added) ===
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# === Build artifacts ===
+dist/
+build/
+*.tgz
+*.tar.gz
+
+# === Logs ===
+*.log
+logs/
+
+# === Coverage & test output ===
+coverage/
+.nyc_output/
+
+# === Temp ===
+tmp/
+temp/
+.cache/
+
+# === Screenshots (local dev only — committed ones live in docs/) ===
+/screenshots/
+*.local.png
+
+# === Google site verification files ===
+# Drop the file Google gives you into the repo root, it'll be served as-is.
+# We don't want to commit it here since each deploy target has its own.
+google*.html
