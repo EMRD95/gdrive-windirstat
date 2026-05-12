@@ -145,6 +145,7 @@ export class TreemapRenderer {
     this.tree = null;
     this.leaves = [];         // flat list of FILE rects only (post recursive layout)
     this.leafById = new Map(); // id -> leaf rect, for fast lookup
+    this.folderById = new Map(); // id -> folder bounding rect (for selection outline)
     this.parentMap = new Map(); // id -> parent node (for tooltip "In:" label)
     this.grid = null;         // spatial hit-test grid
     this.gridW = 0; this.gridH = 0;
@@ -159,6 +160,37 @@ export class TreemapRenderer {
     this.cache = document.createElement('canvas');
     this.cacheCtx = this.cache.getContext('2d', { alpha: false });
     this.cacheDirty = true;
+    // Van Wijk 1999 cushion parameters — reverse-engineered from WinDirStat's
+    // CTreeMap::DrawCushion (windirstat/windirstat, Controls/TreeMap.cpp + .h).
+    // Pure Lambert shading, NO specular. The metallic look comes from:
+    //   1. An overbright factor (brightness / PALETTE_BRIGHTNESS ≈ 1.467)
+    //      that pushes channels over 255.
+    //   2. NormalizeColor() redistribution of the overflow into the other
+    //      two channels instead of clamping — this washes highlights toward
+    //      white while keeping hue saturation on the dim side.
+    //   3. All source colors pre-normalized to palette brightness 0.6 so the
+    //      overbright factor produces a consistent look across the palette.
+    //
+    // Defaults match TreeMap.h:222-233 (DefaultOptions).
+    //   height       = 0.88  (our initial ridge = height * scaleFactor)
+    //   scaleFactor  = 0.91  (per-level attenuation of ridge height)
+    //   ambientLight = 0.13  (Ia;  Is = 1 - Ia)
+    //   lightSource  = (-1, -1, 10), normalized → (-0.09901, -0.09901, 0.99015)
+    //   brightness   = 0.88
+    //   PALETTE_BRIGHTNESS = 0.6 (TreeMap.cpp:37)
+    this.cushionH   = 0.88 * 0.91;         // initial ridge height at root
+    this.cushionF   = 0.91;                // decay per nesting level
+    this.cushionLx  = -0.09901475;         // -1 / sqrt(102)
+    this.cushionLy  = -0.09901475;         // -1 / sqrt(102)
+    this.cushionLz  =  0.99014746;         // 10 / sqrt(102)
+    this.cushionIa  = 0.13;
+    this.cushionIs  = 1 - 0.13;
+    // Bumped from WinDirStat's 0.88 default — at our typical display sizes
+    // the cushion-averaged pixel reads a touch darker than WDS on Windows,
+    // so a small overbright bump restores the expected brightness without
+    // blowing out the highlight overflow behavior.
+    this.cushionBrightness = 0.95;
+    this.cushionPaletteBrightness = 0.6;
     this._bindEvents();
   }
 
@@ -226,15 +258,19 @@ export class TreemapRenderer {
   // Full-tree recursive layout. Every file in the drive becomes a leaf rect,
   // clustered inside its folder's region so siblings sit side-by-side
   // (classic WinDirStat behaviour). Folders themselves are never drawn.
+  // Surface coefficients (sx1, sx2, sy1, sy2) for van Wijk cushion shading
+  // accumulate during descent: each folder adds its own parabolic bump,
+  // attenuated by `f^depth`, so leaves inherit the full hierarchy's surface.
   _layout() {
     this.leaves = [];
     this.leafById.clear();
+    this.folderById.clear();
     this.cacheDirty = true;
     if (!this.tree) return;
     const W = this.canvas.width / this.dpr;
     const H = this.canvas.height / this.dpr;
     if (W < 1 || H < 1) return;
-    this._layoutNode(this.tree, 0, 0, W, H);
+    this._layoutNode(this.tree, 0, 0, W, H, 0, 0, 0, 0, this.cushionH);
     // Populate lookup map in one pass
     for (let i = 0; i < this.leaves.length; i++) {
       this.leafById.set(this.leaves[i].id, this.leaves[i]);
@@ -242,12 +278,21 @@ export class TreemapRenderer {
     this._buildGrid(W, H);
   }
 
-  _layoutNode(node, x, y, w, h) {
+  _layoutNode(node, x, y, w, h, sx1, sx2, sy1, sy2, bumpH) {
     // Prune anything too small to be visible — saves massive work on deep dirs
     if (w < this.MIN_DRAW || h < this.MIN_DRAW) return;
     if (!node) return;
 
-    // File leaf: record the rect and stop
+    // van Wijk 1999: every rect at every level adds its own parabolic bump.
+    // Accumulating coefficients down the tree produces the signature
+    // WinDirStat look — big folder cushions with small sub-bumps on top.
+    const x2 = x + w, y2 = y + h;
+    const nSx1 = sx1 + 4 * bumpH * (x2 + x) / w;
+    const nSx2 = sx2 - 4 * bumpH / w;
+    const nSy1 = sy1 + 4 * bumpH * (y2 + y) / h;
+    const nSy2 = sy2 - 4 * bumpH / h;
+
+    // File leaf: freeze final surface + rect, then stop
     if (!node.isFolder) {
       if (!node.size || node.size <= 0) return;
       this.leaves.push({
@@ -258,13 +303,17 @@ export class TreemapRenderer {
         modifiedTime: node.modifiedTime,
         x, y, w, h,
         color: colorForNode(node),
+        sx1: nSx1, sx2: nSx2, sy1: nSy1, sy2: nSy2,
       });
       return;
     }
 
-    // Folder: squarify its children into this rect, recurse into each
+    // Folder: squarify children inside this rect, recurse w/ attenuated bump
     const kids = node.children;
     if (!kids || !kids.length) return;
+    // Record this folder's bounding rect so clicking it in the list view
+    // can outline its whole cluster in the treemap.
+    this.folderById.set(node.id, { x, y, w, h });
     const items = [];
     for (let i = 0; i < kids.length; i++) {
       const c = kids[i];
@@ -273,9 +322,10 @@ export class TreemapRenderer {
     if (!items.length) return;
     items.sort((a, b) => b.size - a.size);
     const rects = squarify(items, x, y, w, h);
+    const childH = bumpH * this.cushionF;
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
-      this._layoutNode(r.node, r.x, r.y, r.w, r.h);
+      this._layoutNode(r.node, r.x, r.y, r.w, r.h, nSx1, nSx2, nSy1, nSy2, childH);
     }
   }
 
@@ -316,6 +366,7 @@ export class TreemapRenderer {
     // Topmost = last inserted = deepest leaf at that point
     for (let i = bucket.length - 1; i >= 0; i--) {
       const r = this.leaves[bucket[i]];
+      if (!r) continue; // stale grid index (leaves rebuilt); skip
       if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r;
     }
     return null;
@@ -528,105 +579,227 @@ export class TreemapRenderer {
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2.5;
         ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+      } else {
+        // Folder selection — outline the whole cluster so the user can see
+        // which region on the treemap contains the folder's files.
+        const f = this.folderById.get(this.selectedId);
+        if (f && f.w >= 2 && f.h >= 2) {
+          ctx.save();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(f.x + 1, f.y + 1, f.w - 2, f.h - 2);
+          ctx.restore();
+        }
       }
     }
   }
 
   _renderCache(W, H) {
     const ctx = this.cacheCtx;
-    ctx.fillStyle = this._bgColor();
-    ctx.fillRect(0, 0, W, H);
-    if (!this.leaves.length) return;
+    if (!this.leaves.length) {
+      ctx.fillStyle = this._bgColor();
+      ctx.fillRect(0, 0, W, H);
+      return;
+    }
 
-    // Batch fill by color — big speedup with thousands of files.
-    // Visible leaves only; we already pruned at layout but double-check draw size.
-    const batches = new Map(); // color -> indices
+    // --- Van Wijk 1999 per-pixel cushion shading ---
+    // Each leaf carries accumulated surface coefficients (sx1, sx2, sy1, sy2).
+    // The height field z(x,y) = -(sx2 x² + sx1 x + sy2 y² + sy1 y + const),
+    // and the un-normalized outward normal is n = (-(2 sx2 x + sx1), -(2 sy2 y + sy1), 1).
+    // Lambert shading with light L gives intensity = Ia + max(0, Is * L·n / |n|).
+    // We bake this into an ImageData buffer (one pass over the whole canvas)
+    // which is then blitted via drawImage on every interaction — O(1) hover cost.
+    const dpr = this.dpr;
+    const bw = this.cache.width, bh = this.cache.height;
+    if (bw < 1 || bh < 1) return;
+
+    const img = ctx.createImageData(bw, bh);
+    const buf32 = new Uint32Array(img.data.buffer);
+
+    // Background: parse once, fill whole buffer via Uint32 .fill (very fast)
+    const bgRgb = parseCssColorRgb(this._bgColor());
+    const bgPacked = packRgba(bgRgb.r, bgRgb.g, bgRgb.b);
+    buf32.fill(bgPacked);
+
+    const Lx = this.cushionLx, Ly = this.cushionLy, Lz = this.cushionLz;
+    const Ia = this.cushionIa, Is = this.cushionIs;
+    // WinDirStat's "metallic" trick: overbright the pixel past 1.0 then let
+    // NormalizeColor redistribute per-channel overflow into the other two
+    // channels. This is what washes highlights toward white while preserving
+    // hue in shadow — it's NOT specular reflection, it's HDR-ish tone mapping.
+    const brightnessFactor = this.cushionBrightness / this.cushionPaletteBrightness;
+
     for (let i = 0; i < this.leaves.length; i++) {
       const r = this.leaves[i];
       if (r.w < this.MIN_DRAW || r.h < this.MIN_DRAW) continue;
-      let arr = batches.get(r.color);
-      if (!arr) { arr = []; batches.set(r.color, arr); }
-      arr.push(i);
-    }
-    for (const [color, idxs] of batches) {
-      ctx.fillStyle = color;
-      for (let j = 0; j < idxs.length; j++) {
-        const r = this.leaves[idxs[j]];
-        ctx.fillRect(r.x, r.y, r.w, r.h);
+
+      // Pre-normalize this leaf's color to PALETTE_BRIGHTNESS so the
+      // brightnessFactor multiply produces the intended WinDirStat look
+      // regardless of what hue colorForNode() returned.
+      const pal = paletteColor(r.color, this.cushionPaletteBrightness);
+      const cr = pal.r, cg = pal.g, cb = pal.b;
+
+      // Backing-pixel bounds (leaves are stored in CSS-pixel coords).
+      // Clamp end to bw/bh in case of sub-pixel rounding overrun.
+      const bx0 = Math.max(0, Math.floor(r.x * dpr));
+      const by0 = Math.max(0, Math.floor(r.y * dpr));
+      const bx1 = Math.min(bw, Math.ceil((r.x + r.w) * dpr));
+      const by1 = Math.min(bh, Math.ceil((r.y + r.h) * dpr));
+      if (bx1 <= bx0 || by1 <= by0) continue;
+
+      // Tiny tiles: shading adds noise, not info — flat-fill each row.
+      if (r.w < 3 || r.h < 3) {
+        const packed = packRgba(cr, cg, cb);
+        for (let py = by0; py < by1; py++) {
+          buf32.fill(packed, py * bw + bx0, py * bw + bx1);
+        }
+        continue;
+      }
+
+      // Shaded tile — inner loop hot path.
+      // Mirrors CTreeMap::DrawCushion (TreeMap.cpp:811-855) exactly:
+      //   ny = -(2*surface[1]*(y+0.5) + surface[3])
+      //   nx = -(2*surface[0]*(x+0.5) + surface[2])
+      //   cosa = min((nx*Lx + ny*Ly + Lz)/sqrt(nx²+ny²+1), 1)
+      //   pixel = Ia + max(Is*cosa, 0)
+      //   pixel *= brightnessFactor
+      //   R = colR*pixel ...  NormalizeColor(R,G,B)
+      const sx1 = r.sx1, sx2 = r.sx2, sy1 = r.sy1, sy2 = r.sy2;
+      for (let py = by0; py < by1; py++) {
+        const yCss = (py + 0.5) / dpr;
+        const ny = -(2 * sy2 * yCss + sy1);
+        const rowBase = py * bw;
+        for (let px = bx0; px < bx1; px++) {
+          const xCss = (px + 0.5) / dpr;
+          const nx = -(2 * sx2 * xCss + sx1);
+          let cosa = (Lx * nx + Ly * ny + Lz) /
+                     Math.sqrt(nx * nx + ny * ny + 1);
+          if (cosa > 1) cosa = 1;
+          let diff = Is * cosa;
+          if (diff < 0) diff = 0;
+          const pixel = (Ia + diff) * brightnessFactor;
+
+          let R = (cr * pixel) | 0;
+          let G = (cg * pixel) | 0;
+          let B = (cb * pixel) | 0;
+
+          // --- CColorSpace::NormalizeColor (TreeMap.h:61-95) inlined ---
+          // If a channel exceeds 255, split its overflow/2 into each of
+          // the other two; if that in turn overflows, push the remainder
+          // into the last channel. Only one channel can overflow at a time
+          // because total brightness * brightnessFactor <= 1.467 * 3 * 0.6 < 3.
+          if (R > 255) {
+            const h = (R - 255) >> 1;
+            R = 255; G += h; B += h;
+            if (G > 255) { B += G - 255; G = 255; }
+            else if (B > 255) { G += B - 255; B = 255; }
+          } else if (G > 255) {
+            const h = (G - 255) >> 1;
+            G = 255; R += h; B += h;
+            if (R > 255) { B += R - 255; R = 255; }
+            else if (B > 255) { R += B - 255; B = 255; }
+          } else if (B > 255) {
+            const h = (B - 255) >> 1;
+            B = 255; R += h; G += h;
+            if (R > 255) { G += R - 255; R = 255; }
+            else if (G > 255) { R += G - 255; G = 255; }
+          }
+          if (R > 255) R = 255;
+          if (G > 255) G = 255;
+          if (B > 255) B = 255;
+
+          // Little-endian RGBA -> ABGR in memory
+          buf32[rowBase + px] = (0xff << 24) | ((B & 0xff) << 16) | ((G & 0xff) << 8) | (R & 0xff);
+        }
       }
     }
 
-    // Subtle bevel on bigger cells so the grid reads three-dimensional (real WDS look)
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.putImageData(img, 0, 0);
+
+    // Hairline separator — a 1-px dark edge between tiles helps the cushions
+    // read as distinct shapes. Cheap: only medium+ leaves draw it.
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
     for (let i = 0; i < this.leaves.length; i++) {
       const r = this.leaves[i];
-      if (r.w < 8 || r.h < 8) continue;
-      ctx.fillRect(r.x, r.y, r.w, 1);
-      ctx.fillRect(r.x, r.y, 1, r.h);
-    }
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    for (let i = 0; i < this.leaves.length; i++) {
-      const r = this.leaves[i];
-      if (r.w < 8 || r.h < 8) continue;
+      if (r.w < 4 || r.h < 4) continue;
       ctx.fillRect(r.x, r.y + r.h - 1, r.w, 1);
       ctx.fillRect(r.x + r.w - 1, r.y, 1, r.h);
     }
 
-    // Labels only on big-enough cells
-    for (let i = 0; i < this.leaves.length; i++) {
-      const r = this.leaves[i];
-      if (r.w < 60 || r.h < 22) continue;
-      drawLabel(ctx, r);
-    }
+    // Labels on tiles removed — hover tooltip carries the file info.
+    // WinDirStat itself doesn't draw per-tile text either; the treemap is
+    // purely a visual density map and text lives in the list pane.
   }
 }
 
-function drawLabel(ctx, r) {
-  const brightness = getBrightness(r.color);
-  const textColor = brightness > 170 ? '#111' : '#fff';
-  const padding = 4;
-  const fontSize = Math.min(12, Math.max(9, Math.floor(r.h / 3.6)));
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-  ctx.clip();
-  // Dark strip behind text for legibility
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  const stripH = r.h > 40 ? fontSize * 2 + 6 : fontSize + 4;
-  ctx.fillRect(r.x + padding, r.y + padding, r.w - padding * 2, stripH);
-  ctx.fillStyle = textColor;
-  ctx.font = `${r.h > 50 ? 'bold ' : ''}${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-  const availableW = r.w - padding * 2 - 2;
-  const maxChars = Math.floor(availableW / (fontSize * 0.58));
-  ctx.fillText(truncate(r.name, maxChars), r.x + padding + 1, r.y + padding + fontSize, availableW);
-  if (r.h > 40) {
-    ctx.font = `${Math.max(9, fontSize - 1)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-    ctx.globalAlpha = 0.9;
-    ctx.fillText(formatBytes(r.size), r.x + padding + 1, r.y + padding + fontSize * 2 + 2, availableW);
-    ctx.globalAlpha = 1;
+// --- Color parsing helpers for the shader ---
+const _cssColorCache = new Map();
+let _cssColorProbe = null;
+function parseCssColorRgb(color) {
+  const hit = _cssColorCache.get(color);
+  if (hit) return hit;
+  if (!_cssColorProbe) {
+    _cssColorProbe = document.createElement('canvas');
+    _cssColorProbe.width = 1; _cssColorProbe.height = 1;
   }
-  ctx.restore();
+  const g = _cssColorProbe.getContext('2d');
+  g.clearRect(0, 0, 1, 1);
+  g.fillStyle = color;
+  g.fillRect(0, 0, 1, 1);
+  const d = g.getImageData(0, 0, 1, 1).data;
+  const rgb = { r: d[0], g: d[1], b: d[2] };
+  _cssColorCache.set(color, rgb);
+  return rgb;
 }
 
-function getBrightness(color) {
-  if (color.startsWith('#')) {
-    const r = parseInt(color.slice(1, 3), 16);
-    const g = parseInt(color.slice(3, 5), 16);
-    const b = parseInt(color.slice(5, 7), 16);
-    return (r * 299 + g * 587 + b * 114) / 1000;
-  }
-  if (color.startsWith('hsl')) {
-    // crude: pull lightness
-    const m = color.match(/(\d+)%\s*\)/);
-    if (m) return parseInt(m[1], 10) * 2.55;
-  }
-  return 128;
+function packRgba(r, g, b) {
+  // ImageData is little-endian on every real browser: bytes are R,G,B,A
+  // which reads as a Uint32 of 0xAABBGGRR.
+  return (0xff << 24) | ((b & 0xff) << 16) | ((g & 0xff) << 8) | (r & 0xff);
 }
 
-function truncate(s, n) {
-  if (!s) return '';
-  if (s.length <= n) return s;
-  return s.slice(0, Math.max(0, n - 1)) + '\u2026';
+// Mirrors CColorSpace::MakeBrightColor (TreeMap.h:37-58).
+// Rescales any RGB to a specific brightness = (r+g+b)/3/255, then redistributes
+// any per-channel overflow into the other channels (NormalizeColor).
+// This is what EqualizeColors does to the WinDirStat palette up-front, and it's
+// why the cushion shader looks consistent no matter which hue you feed it.
+const _paletteColorCache = new Map();
+function paletteColor(color, brightness) {
+  const key = color + '|' + brightness;
+  const hit = _paletteColorCache.get(key);
+  if (hit) return hit;
+  const rgb = parseCssColorRgb(color);
+  let dr = rgb.r / 255, dg = rgb.g / 255, db = rgb.b / 255;
+  const sum = dr + dg + db;
+  if (sum > 0.0001) {
+    const f = 3.0 * brightness / sum;
+    dr *= f; dg *= f; db *= f;
+  }
+  let r = (dr * 255) | 0;
+  let g = (dg * 255) | 0;
+  let b = (db * 255) | 0;
+  if (r > 255) {
+    const h = (r - 255) >> 1;
+    r = 255; g += h; b += h;
+    if (g > 255) { b += g - 255; g = 255; }
+    else if (b > 255) { g += b - 255; b = 255; }
+  } else if (g > 255) {
+    const h = (g - 255) >> 1;
+    g = 255; r += h; b += h;
+    if (r > 255) { b += r - 255; r = 255; }
+    else if (b > 255) { r += b - 255; b = 255; }
+  } else if (b > 255) {
+    const h = (b - 255) >> 1;
+    b = 255; r += h; g += h;
+    if (r > 255) { g += r - 255; r = 255; }
+    else if (g > 255) { r += g - 255; g = 255; }
+  }
+  if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
+  if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+  const out = { r, g, b };
+  _paletteColorCache.set(key, out);
+  return out;
 }
 
 function escapeHtml(text) {
