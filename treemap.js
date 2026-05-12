@@ -63,9 +63,12 @@ export function colorCategoryFor(node) {
 
 export function formatBytes(b) {
   if (!b || b === 0) return '0 B';
+  // Match Google Drive's convention: binary units (1024-based) labeled
+  // as GB/MB/etc (not GiB). Google's storage page does the same, so a
+  // 24.71 GB file on drive.google.com reads as 24.71 GB here too.
   const u = ['B','KB','MB','GB','TB','PB'];
-  const i = Math.min(Math.floor(Math.log10(Math.abs(b))/3), u.length-1);
-  return (b / 10**(i*3)).toFixed(i === 0 ? 0 : 2) + ' ' + u[i];
+  const i = Math.min(Math.floor(Math.log(Math.abs(b)) / Math.log(1024)), u.length - 1);
+  return (b / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2) + ' ' + u[i];
 }
 
 function formatDate(iso) {

@@ -49,9 +49,13 @@ export async function* scanDrive(accessToken, onProgress) {
       // upstream. Drop anything with a driveId to be safe.
       .filter(f => !f.driveId)
       .map(f => {
-        // Prefer `size` (actual bytes). Fall back to `quotaBytesUsed`.
-        // Both come back as strings from the API; Number is fine up to 9 PB.
-        const sz = Number(f.size || f.quotaBytesUsed || 0) || 0;
+        // Drive returns both fields as strings. Note: the string "0" is
+        // truthy in JS, so a naive `f.size || f.quotaBytesUsed` short-
+        // circuits to 0 and silently kills sizes for every Workspace doc.
+        // Parse both independently and take the larger.
+        const sizeNum = Number(f.size) || 0;
+        const quotaNum = Number(f.quotaBytesUsed) || 0;
+        const sz = Math.max(sizeNum, quotaNum);
         return {
           id: f.id,
           name: f.name,

@@ -41,12 +41,31 @@ self.onmessage = function (e) {
     const rootId = 'root';
     getOrCreate(rootId, { name: rootName || 'My Drive', isFolder: true, size: 0 });
 
-    // attach orphans to root
-    for (const [id, ch] of children) {
-      if (id !== rootId && !nodes.has(id)) {
-        const rootCh = children.get(rootId);
-        if (!rootCh.includes(id)) rootCh.push(id);
+    // Find orphan nodes — nodes that no other node claims as a child.
+    // This catches the real Drive root folder (whose id is e.g. "0ABC..."
+    // not the alias "root"), plus any file whose parent wasn't fetched.
+    // Without this, DFS from "root" sees an empty tree and reports 0 B.
+    const isChildOfSomeone = new Set();
+    for (const ch of children.values()) {
+      for (const cid of ch) isChildOfSomeone.add(cid);
+    }
+    const rootCh = children.get(rootId);
+    for (const id of nodes.keys()) {
+      if (id === rootId) continue;
+      if (isChildOfSomeone.has(id)) continue;
+      const n = nodes.get(id);
+      // Unnamed orphan folders are parent IDs we only saw referenced
+      // (shared-drive roots we can't enumerate, filtered-out parents).
+      // Dissolve them: promote their children to root, discard the shell.
+      if (n && n.isFolder && (!n.name || n.name === '')) {
+        for (const cid of (children.get(id) || [])) {
+          if (!rootCh.includes(cid)) rootCh.push(cid);
+        }
+        nodes.delete(id);
+        children.delete(id);
+        continue;
       }
+      if (!rootCh.includes(id)) rootCh.push(id);
     }
 
     // aggregate sizes bottom-up using DFS
