@@ -385,6 +385,25 @@ function selectNode(node) {
   selectedNode = node;
   renderer?.selectNode(node.id);
   showInfoCard(node);
+
+  // If the node lives inside collapsed folders, expand every ancestor so
+  // its row exists in the list DOM. Only re-render if we actually changed
+  // expansion state — avoids a pointless reflow for top-level files.
+  let needsRerender = false;
+  const path = findPathToId(currentTree, node.id);
+  if (path && path.length > 1) {
+    // path = [root, ...ancestors, node]. Expand every ancestor folder
+    // EXCEPT the root (root is always implicit) and the node itself.
+    for (let i = 1; i < path.length - 1; i++) {
+      const ancestor = path[i];
+      if (ancestor.isFolder && !expandedFolders.has(ancestor.id)) {
+        expandedFolders.add(ancestor.id);
+        needsRerender = true;
+      }
+    }
+  }
+  if (needsRerender) renderList();
+
   // Update list selection highlight + scroll into view
   document.querySelectorAll('.list-row.selected').forEach(r => r.classList.remove('selected'));
   const row = document.querySelector(`.list-row[data-id="${CSS.escape(node.id)}"]`);
@@ -860,6 +879,20 @@ function findNodeById(root, id) {
   for (const c of root.children) {
     const found = findNodeById(c, id);
     if (found) return found;
+  }
+  return null;
+}
+
+// Return [root, ..., node] or null. Used by selectNode to auto-expand
+// every ancestor folder so the target row exists in the list DOM before
+// we call scrollIntoView on it.
+function findPathToId(root, id) {
+  if (!root) return null;
+  if (root.id === id) return [root];
+  if (!root.children) return null;
+  for (const c of root.children) {
+    const sub = findPathToId(c, id);
+    if (sub) return [root, ...sub];
   }
   return null;
 }
