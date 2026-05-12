@@ -7,7 +7,15 @@ import { CLIENT_ID as CFG_CLIENT_ID } from './config.js';
 // CLIENT_ID is loaded from config.js (gitignored). Copy config.example.js to
 // config.js and paste your Google OAuth client ID there.
 const CLIENT_ID = (CFG_CLIENT_ID || '').trim();
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// drive.metadata.readonly — metadata only (name, size, parents, mime). We
+// never fetch file contents. drive.file wouldn't work here: that scope only
+// exposes files the app itself created/opened, not the user's existing Drive.
+const SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
+// Derived capability flag — true only when the scope grants write access.
+// Controls visibility of Move to Trash. To enable write ops, switch SCOPE
+// to 'https://www.googleapis.com/auth/drive' (also restricted) and this
+// flag will flip automatically.
+const CAN_WRITE = SCOPE.endsWith('/auth/drive') || SCOPE.endsWith('/drive.file');
 const DIVIDER_STORAGE_KEY = 'ds_list_pane_height_pct';
 const TREEMAP_VISIBLE_KEY = 'ds_treemap_visible';
 
@@ -54,6 +62,12 @@ const els = {
   cookieNotice: $('cookie-notice'),
   cookieAccept: $('cookie-accept'),
 };
+
+// Hide write-only UI (Move to Trash) when the current OAuth scope can't perform
+// writes. Flip SCOPE to /auth/drive to bring it back.
+if (!CAN_WRITE && els.btnDelete) {
+  els.btnDelete.style.display = 'none';
+}
 
 let accessToken = localStorage.getItem('ds_access_token');
 let tokenClient = null;
