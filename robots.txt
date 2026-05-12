@@ -1,0 +1,9 @@
+# DriveStat — https://drivestat.app/
+# The app is client-side; indexing the landing page + legal pages is fine.
+# Anything behind auth is rendered client-side and invisible to crawlers anyway.
+
+User-agent: *
+Allow: /
+Disallow: /?dev=1
+
+Sitemap: https://drivestat.app/sitemap.xml
