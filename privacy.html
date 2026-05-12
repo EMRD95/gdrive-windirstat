@@ -78,10 +78,10 @@
     <p>When you sign in with Google and grant permission, DriveStat requests the following scope:</p>
     <ul>
       <li>
-        <code>https://www.googleapis.com/auth/drive.file</code> — per-file access to files
-        the app creates or the user opens with the app. DriveStat uses this to read file
-        metadata (name, size, type, modification date, parent folder) so it can build the
-        treemap visualization.
+        <code>https://www.googleapis.com/auth/drive.metadata.readonly</code> — read-only
+        access to file metadata (name, size, mime type, parents, modified time).
+        DriveStat uses this to build the treemap. We never request or receive file
+        contents, thumbnails, or previews.
       </li>
     </ul>
     <p>DriveStat reads only <strong>metadata</strong> (filenames, sizes, MIME types, timestamps, folder structure). It does not:</p>
