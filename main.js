@@ -62,7 +62,6 @@ const els = {
   cookieNotice: $('cookie-notice'),
   cookieAccept: $('cookie-accept'),
   demoStrip: $('demo-strip'),
-  btnDemoSignin: $('btn-demo-signin'),
   btnDemoDismiss: $('btn-demo-dismiss'),
 };
 
@@ -153,9 +152,9 @@ function clearAuth() {
 }
 
 function onSignedIn() {
-  // Leaving demo mode: hide the demo strip and clear the synthetic tree so
-  // the user isn't looking at stale placeholder data. They'll hit "Scan Drive"
-  // (or "Resume" if a cache exists) to load their real Drive.
+  // Leaving demo mode: clear everything synthetic so the user isn't looking at
+  // placeholder residue. They'll hit "Scan Drive" (or "Resume" if a cache
+  // exists) to load their real Drive.
   const wasDemo = inDemoMode;
   inDemoMode = false;
   if (els.demoStrip) els.demoStrip.classList.add('hidden');
@@ -163,7 +162,28 @@ function onSignedIn() {
     currentTree = null;
     selectedNode = null;
     listPath = [];
-    if (renderer) { renderer.tree = null; }
+    searchQuery = '';
+    if (els.search) els.search.value = '';
+    // Wipe the file list, breadcrumbs, and treemap canvas so nothing from the
+    // demo survives into the real session.
+    if (els.listBody) els.listBody.innerHTML = '';
+    if (els.crumbs) els.crumbs.innerHTML = '';
+    if (renderer) {
+      renderer.tree = null;
+      renderer.hoveredId = null;
+      renderer.selectedId = null;
+      renderer.leafById && renderer.leafById.clear && renderer.leafById.clear();
+      renderer.folderById && renderer.folderById.clear && renderer.folderById.clear();
+      const ctx = renderer.ctx;
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, renderer.canvas.width, renderer.canvas.height);
+      }
+      if (renderer.cache) {
+        const cctx = renderer.cache.getContext && renderer.cache.getContext('2d');
+        if (cctx) cctx.clearRect(0, 0, renderer.cache.width, renderer.cache.height);
+      }
+    }
     hideInfoCard();
     // Reset stats so the pills don't show the demo's numbers.
     updateStats(null, 0, 0, 0);
@@ -1292,10 +1312,6 @@ function loadDemo({ tiny = false } = {}) {
   els.main.classList.remove('hidden');
   els.intro.classList.add('hidden');
   if (els.demoStrip) els.demoStrip.classList.remove('hidden');
-  // The strip carries its own sign-in CTA, so hide the header button to avoid
-  // two "Sign in" affordances side-by-side. It comes back if the user
-  // dismisses the strip.
-  if (!accessToken) els.signin.classList.add('hidden');
   currentTree = tree;
   showTree(tree);
   updateStats(tree, fileCount, folderCount, dt);
@@ -1304,11 +1320,10 @@ function loadDemo({ tiny = false } = {}) {
   console.log(`[demo] ${fileCount.toLocaleString()} files, ${folderCount.toLocaleString()} folders, ${(tree.size / 1024 ** 4).toFixed(2)} TiB in ${dt.toFixed(2)}s`);
 }
 
-// Hide the demo strip without discarding the tree — user just wants a cleaner
-// view. Sign-in still available via the header button, which we bring back.
+// Hide the demo strip; the header Sign in with Google button is already
+// present, so the user keeps a clear path to scan their own Drive.
 function dismissDemoStrip() {
   if (els.demoStrip) els.demoStrip.classList.add('hidden');
-  if (!accessToken) els.signin.classList.remove('hidden');
 }
 
 // === Dev harness & landing demo =============================================
@@ -1327,21 +1342,8 @@ function dismissDemoStrip() {
     loadDemo();
   }
 
-  // "Sign in to scan my Drive" button inside the demo strip.
-  if (els.btnDemoSignin) {
-    els.btnDemoSignin.addEventListener('click', () => {
-      if (tokenClient) {
-        startAuthPoll();
-        tokenClient.requestAccessToken();
-      } else {
-        // GIS not yet loaded — fall back to the header sign-in flow.
-        const headerBtn = els.signin.querySelector('button');
-        if (headerBtn) headerBtn.click();
-      }
-    });
-  }
-
-  // "×" dismiss button: hide the strip, restore the header sign-in button.
+  // "×" dismiss button: hide the strip. Header sign-in is always visible
+  // already, so no need to toggle anything else.
   if (els.btnDemoDismiss) {
     els.btnDemoDismiss.addEventListener('click', dismissDemoStrip);
   }
