@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Verification Evidence — DriveStat</title>
+<meta name="description" content="Technical evidence that DriveStat is a purely client-side application with no backend server, submitted in support of Google OAuth restricted-scope verification.">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://drivestat.em95.org/verification.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('ds_theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    else document.documentElement.setAttribute('data-theme', 'dark');
+  } catch(e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+})();
+</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="legal-page">
+<div id="app">
+  <header class="app-header">
+    <div class="brand">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </div>
+      <h1>DriveStat</h1>
+    </div>
+    <div class="header-actions">
+      <a href="index.html" class="btn-secondary">Back to app</a>
+    </div>
+  </header>
+
+  <main class="legal-container">
+    <a href="index.html" class="legal-back">← Back to DriveStat</a>
+
+    <h1>Verification Evidence</h1>
+    <p class="legal-updated">For Google OAuth restricted-scope review · Last updated: <span id="updated"></span></p>
+
+    <div class="legal-toc">
+      <h3>Contents</h3>
+      <ul>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#source">Source code &amp; hosting</a></li>
+        <li><a href="#scope">Scope justification</a></li>
+        <li><a href="#data">Where user data lives</a></li>
+        <li><a href="#limited-use">Limited Use compliance</a></li>
+        <li><a href="#verify">How to verify this yourself</a></li>
+        <li><a href="#casa">CASA applicability</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </div>
+
+    <h2 id="summary">Summary</h2>
+    <p>
+      DriveStat is a static single-page web application. It has no backend server
+      operated by the developer. The OAuth access token and any Drive metadata
+      retrieved from Google APIs exist only in the end user's browser and are
+      never transmitted to any server controlled by the developer. The entire
+      source tree is public on GitHub and the deployed site can be byte-for-byte
+      reproduced from the repository.
+    </p>
+
+    <h2 id="architecture">Architecture</h2>
+    <p>
+      Data flow at runtime (no developer-operated server is involved at any step):
+    </p>
+    <pre><code>User's browser
+  ├── Loads static HTML/CSS/JS ..........  GitHub Pages CDN (em95.org → github.io)
+  ├── Sign-in popup .....................  accounts.google.com
+  ├── Drive metadata requests ...........  www.googleapis.com (direct, over TLS)
+  ├── Scanned tree cache ................  IndexedDB (in-browser)
+  └── Access token + preferences ........  localStorage (in-browser)</code></pre>
+    <p>
+      There is no server-side component under developer control. GitHub Pages is
+      a static file host; it serves the same HTML/CSS/JS bytes to every visitor
+      and has no ability to receive or process Google user data.
+    </p>
+
+    <h2 id="source">Source code &amp; hosting</h2>
+    <ul>
+      <li>Public repository: <a href="https://github.com/EMRD95/gdrive-windirstat" target="_blank" rel="noopener">github.com/EMRD95/gdrive-windirstat</a></li>
+      <li>Deploy workflow (commit-to-live): <a href="https://github.com/EMRD95/gdrive-windirstat/blob/main/.github/workflows/deploy.yml" target="_blank" rel="noopener">.github/workflows/deploy.yml</a></li>
+      <li>Hosting platform: <a href="https://docs.github.com/pages" target="_blank" rel="noopener">GitHub Pages</a> (static file CDN; no server-side execution)</li>
+      <li>Custom domain: <code>drivestat.em95.org</code>, served via GitHub Pages with a Let's Encrypt certificate</li>
+      <li>Build output: only <code>.html</code>, <code>.css</code>, <code>.js</code>, and image assets (no binaries, no server processes)</li>
+    </ul>
+    <p>
+      The deploy workflow injects the public OAuth Client ID at build time from
+      a GitHub secret. This is the <em>only</em> non-public value in the pipeline,
+      and Client IDs are not secrets per Google's OAuth 2.0 documentation — they
+      are visible in-browser at runtime.
+    </p>
+
+    <h2 id="scope">Scope justification</h2>
+    <p>
+      DriveStat requests the single scope
+      <code>https://www.googleapis.com/auth/drive.metadata.readonly</code>.
+    </p>
+    <ul>
+      <li><strong>Why this scope?</strong> The product is a treemap visualization
+        of a user's entire Drive storage, in the spirit of WinDirStat for Windows
+        and DaisyDisk for macOS. Producing an accurate whole-Drive view requires
+        enumerating every file's size and parent folder.</li>
+      <li><strong>Why not <code>drive.file</code>?</strong> <code>drive.file</code> only
+        returns files the user individually selects via Google Picker. That
+        surface is incompatible with "show me where all my storage is going" —
+        the user would have to hand-pick the very files they're trying to
+        discover.</li>
+      <li><strong>What fields are read?</strong> <code>name</code>, <code>mimeType</code>,
+        <code>parents</code>, <code>size</code>, <code>quotaBytesUsed</code>,
+        <code>modifiedTime</code>, <code>ownedByMe</code>, <code>driveId</code>,
+        <code>trashed</code>. File contents, thumbnails, and previews are never
+        requested.</li>
+      <li><strong>Can the app modify user files?</strong> No. <code>drive.metadata.readonly</code>
+        does not grant write access, and the codebase contains no mutation calls.</li>
+    </ul>
+
+    <h2 id="data">Where user data lives</h2>
+    <p>
+      All data derived from the Drive API lives in the end user's browser and
+      nowhere else:
+    </p>
+    <ul>
+      <li><strong>OAuth access token</strong> — <code>localStorage</code> key
+        <code>ds_access_token</code>. Short-lived token issued by Google
+        Identity Services for the current session; cleared on sign-out.</li>
+      <li><strong>Scanned file metadata</strong> — IndexedDB database
+        <code>DriveStatDB</code>, object store <code>files</code>. Caches the
+        scan so repeat visits don't re-enumerate. Cleared by signing out or
+        by clearing browser site data.</li>
+      <li><strong>UI preferences</strong> — <code>localStorage</code> keys
+        <code>ds_theme</code>, <code>ds_list_pane_height_pct</code>,
+        <code>ds_treemap_visible</code>, <code>ds_cookie_ack</code>.</li>
+    </ul>
+    <p>
+      No part of this data is transmitted to any developer-controlled server.
+      There is no such server.
+    </p>
+
+    <h2 id="limited-use">Limited Use compliance</h2>
+    <p>
+      DriveStat's use and transfer of information received from Google APIs
+      adheres to the
+      <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>,
+      including the Limited Use requirements. Specifically:
+    </p>
+    <ul>
+      <li>We use Drive metadata only to render user-facing features that are
+        prominent in the app's UI (treemap, file list, details sidebar).</li>
+      <li>We do not transfer Drive data to others.</li>
+      <li>We do not use Drive data for serving ads.</li>
+      <li>We do not allow humans to read Drive data. Nobody at DriveStat has
+        access to Drive data — there is no server and no database.</li>
+    </ul>
+
+    <h2 id="verify">How to verify this yourself</h2>
+    <p>A reviewer can verify the above claims directly in a few minutes:</p>
+    <ol>
+      <li>Open the deployed site
+        <a href="https://drivestat.em95.org/" target="_blank" rel="noopener">https://drivestat.em95.org/</a>
+        with DevTools → Network tab open and "Preserve log" enabled.</li>
+      <li>Sign in with a test Google account and let a scan run.</li>
+      <li>Observe that the only request destinations are
+        <code>accounts.google.com</code>,
+        <code>apis.google.com</code>,
+        <code>www.googleapis.com</code>,
+        and the static-asset CDN (<code>em95.org</code> /
+        <code>github.io</code>).
+        No request to any developer-controlled server will appear, because no
+        such server exists.</li>
+      <li>Inspect the source repository at
+        <a href="https://github.com/EMRD95/gdrive-windirstat" target="_blank" rel="noopener">github.com/EMRD95/gdrive-windirstat</a>.
+        The deploy workflow (<code>.github/workflows/deploy.yml</code>) ships
+        only the static files in the repo; there is no server build step.</li>
+      <li>Open DevTools → Application → Storage. The token and cached scan are
+        visible in <code>localStorage</code> and IndexedDB respectively, both
+        scoped to the <code>drivestat.em95.org</code> origin. Signing out clears
+        both.</li>
+    </ol>
+
+    <h2 id="casa">CASA applicability</h2>
+    <p>
+      Per Google's
+      <a href="https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification" target="_blank" rel="noopener">restricted-scope verification documentation</a>,
+      a CASA security assessment is required for
+      "apps with ability to access restricted data from or through a third-party server" —
+      i.e. apps that store or transmit restricted-scope data on servers.
+    </p>
+    <p>
+      DriveStat is not such an app. It has no backend. No server operated by or
+      accessible to the developer ever receives, processes, or stores Google
+      user data. On that basis we believe DriveStat qualifies for the
+      client-side exception and should not require a CASA assessment.
+    </p>
+
+    <h2 id="contact">Contact</h2>
+    <p>
+      Verification questions: <a href="mailto:em95org@gmail.com">em95org@gmail.com</a>.
+    </p>
+  </main>
+
+  <footer class="app-footer">
+    <span>© <span id="footer-year"></span> DriveStat</span>
+    <span class="footer-sep">·</span>
+    <a href="privacy.html">Privacy</a>
+    <span class="footer-sep">·</span>
+    <a href="terms.html">Terms</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/EMRD95/gdrive-windirstat" target="_blank" rel="noopener">Source</a>
+  </footer>
+</div>
+<script>
+  document.getElementById('footer-year').textContent = new Date().getFullYear();
+  document.getElementById('updated').textContent = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+</script>
+</body>
+</html>
