@@ -26,7 +26,6 @@ const els = {
   signout: $('signout'),
   main: $('main'),
   btnScan: $('btn-scan'),
-  btnResume: $('btn-resume'),
   btnExport: $('btn-export'),
   search: $('search'),
   btnClearSearch: $('btn-clear-search'),
@@ -151,10 +150,9 @@ function clearAuth() {
   accessToken = null;
 }
 
-function onSignedIn() {
+async function onSignedIn() {
   // Leaving demo mode: clear everything synthetic so the user isn't looking at
-  // placeholder residue. They'll hit "Scan Drive" (or "Resume" if a cache
-  // exists) to load their real Drive.
+  // placeholder residue before their real data lands.
   const wasDemo = inDemoMode;
   inDemoMode = false;
   if (els.demoStrip) els.demoStrip.classList.add('hidden');
@@ -164,8 +162,6 @@ function onSignedIn() {
     listPath = [];
     searchQuery = '';
     if (els.search) els.search.value = '';
-    // Wipe the file list, breadcrumbs, and treemap canvas so nothing from the
-    // demo survives into the real session.
     if (els.listBody) els.listBody.innerHTML = '';
     if (els.crumbs) els.crumbs.innerHTML = '';
     if (renderer) {
@@ -185,17 +181,22 @@ function onSignedIn() {
       }
     }
     hideInfoCard();
-    // Reset stats so the pills don't show the demo's numbers.
     updateStats(null, 0, 0, 0);
-    setStatus('Ready — click Scan Drive to index your Google Drive.');
   }
   els.signin.classList.add('hidden');
   els.signout.classList.remove('hidden');
   els.main.classList.remove('hidden');
   els.intro.classList.add('hidden');
   requestAnimationFrame(() => { if (renderer) renderer.resize(); });
-  checkCache();
   toast('Signed in successfully', 'success');
+
+  // Auto-restore from IndexedDB so refreshing the page doesn't wipe the view.
+  // Scan Drive re-indexes from Google when the user wants fresh data.
+  if (await hasCache()) {
+    await loadFromCache();
+  } else {
+    setStatus('Ready — click Scan Drive to index your Google Drive.');
+  }
 }
 
 let pollInterval = null;
@@ -227,12 +228,6 @@ function onSignedOut() {
   // Fall back to demo mode instead of a blank intro card — users always see
   // something interactive.
   loadDemo();
-}
-
-function checkCache() {
-  hasCache().then(ok => {
-    els.btnResume.classList.toggle('hidden', !ok);
-  });
 }
 
 // === UI helpers ===
@@ -663,7 +658,6 @@ function initDivider() {
 async function doScan() {
   if (!accessToken) { tokenClient.requestAccessToken(); return; }
   els.btnScan.disabled = true;
-  els.btnResume.disabled = true;
   els.btnExport.disabled = true;
   setStatus('Scanning Google Drive...');
   updateProgress(5);
@@ -685,9 +679,7 @@ async function doScan() {
       showTree(data.tree);
       updateStats(data.tree, data.fileCount, data.folderCount, dt);
       els.btnScan.disabled = false;
-      els.btnResume.disabled = false;
       els.btnExport.disabled = false;
-      checkCache();
       worker.terminate();
       setTimeout(hideProgress, 800);
     }
@@ -711,35 +703,48 @@ async function doScan() {
   } catch (err) {
     setStatus('Error: ' + err.message);
     els.btnScan.disabled = false;
-    els.btnResume.disabled = false;
     els.btnExport.disabled = false;
     worker.terminate();
   }
 }
 
-async function doResume() {
+// Restore the last-scanned drive from IndexedDB. Runs automatically on sign-in
+// and on page refresh — scanning is only needed when the user wants to
+// re-index their actual Drive.
+async function loadFromCache() {
   const files = await loadFiles();
-  if (!files.length) { setStatus('No cached data'); return; }
-  setStatus('Loading cache...');
-  updateProgress(30);
+  if (!files.length) return;
+  setStatus('Loading cached drive...');
+  updateProgress(20);
+
+  // Count folder vs file locally — cached entries already carry isFolder, so
+  // we don't need the scanner's running totals (which is what caused the
+  // old "0 files / 0 folders" bug in doResume).
+  let fileCount = 0, folderCount = 0;
+  for (const f of files) {
+    if (f.isFolder) folderCount++; else fileCount++;
+  }
 
   const worker = new Worker('worker.js', { type: 'module' });
+  const t0 = performance.now();
   worker.onmessage = (e) => {
     if (e.data.type === 'tree') {
+      const dt = (performance.now() - t0) / 1000;
       setStatus('Loaded from cache');
       updateProgress(100);
       currentTree = e.data.tree;
       showTree(e.data.tree);
-      updateStats(e.data.tree, e.data.fileCount, e.data.folderCount, null);
-      hideProgress();
+      updateStats(e.data.tree, fileCount, folderCount, dt);
       worker.terminate();
+      setTimeout(hideProgress, 600);
     }
   };
-  const chunk = 5000;
-  for (let i = 0; i < files.length; i += chunk) {
-    worker.postMessage({ type: 'batch', files: files.slice(i, i + chunk), rootName: 'My Drive' });
+
+  const CHUNK = 5000;
+  for (let i = 0; i < files.length; i += CHUNK) {
+    worker.postMessage({ type: 'batch', files: files.slice(i, i + CHUNK), rootName: 'My Drive' });
   }
-  worker.postMessage({ type: 'finish' });
+  worker.postMessage({ type: 'finish', fileCount, folderCount });
 }
 
 function showTree(tree) {
@@ -859,7 +864,6 @@ els.signout.addEventListener('click', () => {
   onSignedOut();
 });
 els.btnScan.addEventListener('click', doScan);
-els.btnResume.addEventListener('click', doResume);
 els.btnExport.addEventListener('click', doExport);
 els.btnUp.addEventListener('click', () => goUpList());
 
