@@ -87,6 +87,13 @@
     </div>
   </header>
 
+  <!-- Demo strip: shown above the main view when browsing synthetic sample data -->
+  <div id="demo-strip" class="demo-strip hidden" role="status" aria-live="polite">
+    <span class="demo-dot"></span>
+    <span class="demo-text"><strong>Demo data</strong> — this is a synthetic drive so you can see what DriveStat looks like. Sign in to scan your own.</span>
+    <button id="btn-demo-dismiss" class="demo-dismiss" type="button" aria-label="Dismiss demo banner" title="Dismiss">×</button>
+  </div>
+
   <main id="main" class="hidden">
     <!-- Toolbar -->
     <div class="toolbar">
@@ -95,7 +102,6 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
           Scan Drive
         </button>
-        <button id="btn-resume" class="btn-secondary hidden">Resume</button>
         <button id="btn-export" class="btn-secondary">Export JSON</button>
       </div>
       <div class="toolbar-group search-wrap">
@@ -212,8 +218,8 @@
     </button>
   </nav>
 
-  <!-- Intro -->
-  <div id="intro" class="intro">
+  <!-- Intro (hidden by default now — demo mode is the landing experience) -->
+  <div id="intro" class="intro hidden">
     <div class="intro-card">
       <div class="logo large">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>

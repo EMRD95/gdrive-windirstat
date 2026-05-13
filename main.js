@@ -26,7 +26,6 @@ const els = {
   signout: $('signout'),
   main: $('main'),
   btnScan: $('btn-scan'),
-  btnResume: $('btn-resume'),
   btnExport: $('btn-export'),
   search: $('search'),
   btnClearSearch: $('btn-clear-search'),
@@ -61,6 +60,8 @@ const els = {
   btnTheme: $('btn-theme'),
   cookieNotice: $('cookie-notice'),
   cookieAccept: $('cookie-accept'),
+  demoStrip: $('demo-strip'),
+  btnDemoDismiss: $('btn-demo-dismiss'),
 };
 
 // Hide write-only UI (Move to Trash) when the current OAuth scope can't perform
@@ -77,6 +78,9 @@ let selectedNode = null;
 let searchQuery = '';
 let sortState = { col: 'size', dir: 'desc' };
 let treemapVisible = localStorage.getItem(TREEMAP_VISIBLE_KEY) !== '0';
+// True while the synthetic marketing tree is on-screen. Used to show the demo
+// strip and to reset stats cleanly when the user kicks off a real scan.
+let inDemoMode = false;
 // Tracks which folders are expanded in the list (by node id)
 const expandedFolders = new Set();
 // List-side navigation stack. Treemap stays static on the whole drive;
@@ -146,14 +150,53 @@ function clearAuth() {
   accessToken = null;
 }
 
-function onSignedIn() {
+async function onSignedIn() {
+  // Leaving demo mode: clear everything synthetic so the user isn't looking at
+  // placeholder residue before their real data lands.
+  const wasDemo = inDemoMode;
+  inDemoMode = false;
+  if (els.demoStrip) els.demoStrip.classList.add('hidden');
+  if (wasDemo) {
+    currentTree = null;
+    selectedNode = null;
+    listPath = [];
+    searchQuery = '';
+    if (els.search) els.search.value = '';
+    if (els.listBody) els.listBody.innerHTML = '';
+    if (els.crumbs) els.crumbs.innerHTML = '';
+    if (renderer) {
+      renderer.tree = null;
+      renderer.hoveredId = null;
+      renderer.selectedId = null;
+      renderer.leafById && renderer.leafById.clear && renderer.leafById.clear();
+      renderer.folderById && renderer.folderById.clear && renderer.folderById.clear();
+      const ctx = renderer.ctx;
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, renderer.canvas.width, renderer.canvas.height);
+      }
+      if (renderer.cache) {
+        const cctx = renderer.cache.getContext && renderer.cache.getContext('2d');
+        if (cctx) cctx.clearRect(0, 0, renderer.cache.width, renderer.cache.height);
+      }
+    }
+    hideInfoCard();
+    updateStats(null, 0, 0, 0);
+  }
   els.signin.classList.add('hidden');
   els.signout.classList.remove('hidden');
   els.main.classList.remove('hidden');
   els.intro.classList.add('hidden');
   requestAnimationFrame(() => { if (renderer) renderer.resize(); });
-  checkCache();
   toast('Signed in successfully', 'success');
+
+  // Auto-restore from IndexedDB so refreshing the page doesn't wipe the view.
+  // Scan Drive re-indexes from Google when the user wants fresh data.
+  if (await hasCache()) {
+    await loadFromCache();
+  } else {
+    setStatus('Ready — click Scan Drive to index your Google Drive.');
+  }
 }
 
 let pollInterval = null;
@@ -177,19 +220,14 @@ function onSignedOut() {
   clearAuth();
   els.signin.classList.remove('hidden');
   els.signout.classList.add('hidden');
-  els.main.classList.add('hidden');
-  els.intro.classList.remove('hidden');
   currentTree = null;
   selectedNode = null;
   listPath = [];
   if (renderer) { renderer.tree = null; }
   hideInfoCard();
-}
-
-function checkCache() {
-  hasCache().then(ok => {
-    els.btnResume.classList.toggle('hidden', !ok);
-  });
+  // Fall back to demo mode instead of a blank intro card — users always see
+  // something interactive.
+  loadDemo();
 }
 
 // === UI helpers ===
@@ -620,7 +658,6 @@ function initDivider() {
 async function doScan() {
   if (!accessToken) { tokenClient.requestAccessToken(); return; }
   els.btnScan.disabled = true;
-  els.btnResume.disabled = true;
   els.btnExport.disabled = true;
   setStatus('Scanning Google Drive...');
   updateProgress(5);
@@ -642,9 +679,7 @@ async function doScan() {
       showTree(data.tree);
       updateStats(data.tree, data.fileCount, data.folderCount, dt);
       els.btnScan.disabled = false;
-      els.btnResume.disabled = false;
       els.btnExport.disabled = false;
-      checkCache();
       worker.terminate();
       setTimeout(hideProgress, 800);
     }
@@ -668,35 +703,48 @@ async function doScan() {
   } catch (err) {
     setStatus('Error: ' + err.message);
     els.btnScan.disabled = false;
-    els.btnResume.disabled = false;
     els.btnExport.disabled = false;
     worker.terminate();
   }
 }
 
-async function doResume() {
+// Restore the last-scanned drive from IndexedDB. Runs automatically on sign-in
+// and on page refresh — scanning is only needed when the user wants to
+// re-index their actual Drive.
+async function loadFromCache() {
   const files = await loadFiles();
-  if (!files.length) { setStatus('No cached data'); return; }
-  setStatus('Loading cache...');
-  updateProgress(30);
+  if (!files.length) return;
+  setStatus('Loading cached drive...');
+  updateProgress(20);
+
+  // Count folder vs file locally — cached entries already carry isFolder, so
+  // we don't need the scanner's running totals (which is what caused the
+  // old "0 files / 0 folders" bug in doResume).
+  let fileCount = 0, folderCount = 0;
+  for (const f of files) {
+    if (f.isFolder) folderCount++; else fileCount++;
+  }
 
   const worker = new Worker('worker.js', { type: 'module' });
+  const t0 = performance.now();
   worker.onmessage = (e) => {
     if (e.data.type === 'tree') {
+      const dt = (performance.now() - t0) / 1000;
       setStatus('Loaded from cache');
       updateProgress(100);
       currentTree = e.data.tree;
       showTree(e.data.tree);
-      updateStats(e.data.tree, e.data.fileCount, e.data.folderCount, null);
-      hideProgress();
+      updateStats(e.data.tree, fileCount, folderCount, dt);
       worker.terminate();
+      setTimeout(hideProgress, 600);
     }
   };
-  const chunk = 5000;
-  for (let i = 0; i < files.length; i += chunk) {
-    worker.postMessage({ type: 'batch', files: files.slice(i, i + chunk), rootName: 'My Drive' });
+
+  const CHUNK = 5000;
+  for (let i = 0; i < files.length; i += CHUNK) {
+    worker.postMessage({ type: 'batch', files: files.slice(i, i + CHUNK), rootName: 'My Drive' });
   }
-  worker.postMessage({ type: 'finish' });
+  worker.postMessage({ type: 'finish', fileCount, folderCount });
 }
 
 function showTree(tree) {
@@ -816,7 +864,6 @@ els.signout.addEventListener('click', () => {
   onSignedOut();
 });
 els.btnScan.addEventListener('click', doScan);
-els.btnResume.addEventListener('click', doResume);
 els.btnExport.addEventListener('click', doExport);
 els.btnUp.addEventListener('click', () => goUpList());
 
@@ -958,49 +1005,350 @@ initTheme();
 initCookieNotice();
 initGIS();
 
-// === Dev harness: ?dev=1 injects a synthetic tree and skips auth ===
-if (new URLSearchParams(location.search).get('dev') === '1') {
-  const mkFile = (id, name, size, mime = 'application/octet-stream') => ({
-    id, name, size, mimeType: mime, isFolder: false,
-    modifiedTime: '2025-01-15T10:00:00Z',
-  });
-  const mkFolder = (id, name, children) => {
-    const size = children.reduce((s, c) => s + c.size, 0);
-    return {
-      id, name, size, isFolder: true, children,
-      mimeType: 'application/vnd.google-apps.folder',
-      modifiedTime: '2025-01-10T10:00:00Z',
+// === Demo tree generator ====================================================
+// Builds a synthetic ~1.3 TB drive with ~120k files across realistic folders.
+// Used for: (a) the logged-out landing page, so visitors see what DriveStat
+// does before signing in; (b) ?dev=1 for local UI work without auth.
+// Deterministic — same seed, same tree, so screenshots are reproducible.
+function buildDemoTree({ tiny = false } = {}) {
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
-  };
-  const files = [];
-  const types = [
-    ['image/jpeg', 'photo', 2_000_000, 10_000_000],
-    ['video/mp4', 'clip', 50_000_000, 200_000_000],
-    ['application/pdf', 'doc', 500_000, 3_000_000],
-    ['audio/mpeg', 'song', 3_000_000, 8_000_000],
-    ['text/plain', 'note', 1000, 50_000],
-    ['application/zip', 'backup', 10_000_000, 300_000_000],
-  ];
-  for (let i = 0; i < 60; i++) {
-    const [mime, base, lo, hi] = types[i % types.length];
-    const ext = mime.split('/')[1].split('+')[0];
-    files.push(mkFile('f' + i, `${base}_${i}.${ext}`, Math.floor(lo + Math.random() * (hi - lo)), mime));
   }
-  files.push(mkFolder('fol1', 'Projects', [
-    mkFile('p1', 'readme.md', 12345, 'text/markdown'),
-    mkFile('p2', 'archive.zip', 150_000_000, 'application/zip'),
-    mkFile('p3', 'data.csv', 8_000_000, 'text/csv'),
-  ]));
-  files.push(mkFolder('fol2', 'Photos 2024', Array.from({ length: 15 }, (_, i) =>
-    mkFile('ph' + i, `IMG_${1000 + i}.jpg`, 3_000_000 + Math.floor(Math.random() * 5_000_000), 'image/jpeg')
-  )));
-  const tree = mkFolder('root', 'My Drive', files);
+  const rand = mulberry32(0xC0FFEE);
+  const rInt = (lo, hi) => Math.floor(lo + rand() * (hi - lo));
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
 
-  els.signin.classList.add('hidden');
-  els.signout.classList.remove('hidden');
+  let _id = 0;
+  const nextId = () => 'demo' + (++_id).toString(36);
+
+  const baseDate = new Date('2020-01-01').getTime();
+  const spanMs = Date.now() - baseDate;
+  const randDate = () => new Date(baseDate + Math.floor(rand() * spanMs)).toISOString();
+
+  const mkFile = (name, size, mime) => ({
+    id: nextId(), name, size, mimeType: mime, isFolder: false,
+    modifiedTime: randDate(),
+  });
+  const mkFolder = (name, children) => ({
+    id: nextId(), name,
+    size: children.reduce((s, c) => s + c.size, 0),
+    isFolder: true, children,
+    mimeType: 'application/vnd.google-apps.folder',
+    modifiedTime: randDate(),
+  });
+
+  // Lognormal-ish draw: u² bias toward lo so most files are small.
+  const szLog = (lo, hi) => {
+    const u = rand();
+    return Math.floor(lo * Math.pow(hi / lo, u * u));
+  };
+
+  const movieTitles = [
+    'Inception', 'Interstellar', 'Dune', 'Arrival', 'Blade_Runner_2049', 'The_Matrix',
+    'Parasite', 'Whiplash', 'Oppenheimer', 'Tenet', 'Everything_Everywhere', 'Mad_Max_Fury_Road',
+    'La_La_Land', 'Spirited_Away', 'Akira', 'Drive', 'Sicario', 'Her',
+    'Ex_Machina', 'Annihilation', 'Prisoners', 'Nightcrawler', 'Uncut_Gems', 'The_Social_Network',
+    'Gone_Girl', 'Zodiac', 'Fight_Club', 'Se7en', 'Heat', 'Collateral',
+    'No_Country_for_Old_Men', 'There_Will_Be_Blood', 'The_Master', 'Phantom_Thread', 'Moonlight',
+    'Birdman', 'The_Revenant', 'Gravity', 'Chernobyl', 'Severance',
+  ];
+  const tvShows = [
+    'Breaking_Bad', 'Better_Call_Saul', 'The_Wire', 'The_Sopranos', 'Mr_Robot',
+    'Succession', 'The_Bear', 'Fargo', 'True_Detective', 'Atlanta',
+  ];
+  const artists = [
+    'Radiohead', 'Boards_of_Canada', 'Burial', 'Aphex_Twin', 'Kendrick_Lamar',
+    'Tyler_the_Creator', 'Four_Tet', 'Jon_Hopkins', 'Nils_Frahm', 'Floating_Points',
+    'Bonobo', 'Caribou', 'Thom_Yorke', 'FKA_twigs', 'James_Blake',
+    'Oneohtrix_Point_Never', 'Flying_Lotus', 'Tame_Impala', 'Arctic_Monkeys', 'The_National',
+  ];
+  const albumWords = ['Kid', 'Amnesiac', 'OK', 'Rainbows', 'Pool', 'Moon', 'Night', 'Slow', 'Blue', 'Ghost', 'Echo', 'Light', 'Shadow', 'Drift'];
+  const trackWords = ['Intro', 'Ascent', 'Horizon', 'Transit', 'Eclipse', 'Signal', 'Mirror', 'Static', 'Return', 'Waves', 'Dust', 'Bloom'];
+  const projects = [
+    'portfolio-site', 'drivestat', 'ml-playground', 'rust-raytracer', 'note-app',
+    'shader-toy', 'wasm-experiments', 'go-microservice', 'next-dashboard', 'graphql-api',
+  ];
+  const workspaces = ['Invoices', 'Contracts', 'Reports', 'Briefs', 'Notes', 'Research', 'Drafts'];
+  const resolutions = ['4K', '1080p', '2160p', 'HDR'];
+
+  const children = [];
+
+  // Movies (~320 GB)
+  (() => {
+    const items = [];
+    const n = tiny ? 6 : 42;
+    for (let i = 0; i < n; i++) {
+      const title = movieTitles[i % movieTitles.length];
+      const year = 2005 + (i * 7) % 20;
+      const res = pick(resolutions);
+      items.push(mkFile(`${title}.${year}.${res}.mkv`, szLog(4_000_000_000, 20_000_000_000), 'video/x-matroska'));
+    }
+    children.push(mkFolder('Movies', items));
+  })();
+
+  // TV Shows (~450 GB, deep hierarchy)
+  (() => {
+    const seriesFolders = [];
+    const seriesCount = tiny ? 2 : tvShows.length;
+    for (let s = 0; s < seriesCount; s++) {
+      const seasonFolders = [];
+      const seasons = tiny ? 1 : 3;
+      for (let se = 1; se <= seasons; se++) {
+        const eps = [];
+        const epCount = tiny ? 5 : 10;
+        for (let ep = 1; ep <= epCount; ep++) {
+          const num = String(ep).padStart(2, '0');
+          eps.push(mkFile(`${tvShows[s]}.S${String(se).padStart(2, '0')}E${num}.1080p.mkv`,
+            szLog(1_200_000_000, 2_500_000_000), 'video/x-matroska'));
+        }
+        seasonFolders.push(mkFolder(`Season ${se}`, eps));
+      }
+      seriesFolders.push(mkFolder(tvShows[s], seasonFolders));
+    }
+    children.push(mkFolder('TV Shows', seriesFolders));
+  })();
+
+  // Raw Footage (~100 GB)
+  (() => {
+    const items = [];
+    const n = tiny ? 10 : 60;
+    for (let i = 0; i < n; i++) {
+      const kind = pick(['interview', 'bRoll', 'drone', 'handheld', 'timelapse']);
+      items.push(mkFile(`${kind}_${String(i).padStart(3, '0')}.mov`,
+        szLog(800_000_000, 4_000_000_000), 'video/quicktime'));
+    }
+    children.push(mkFolder('Raw Footage', items));
+  })();
+
+  // Photos (~180 GB, tens of thousands of small files)
+  (() => {
+    const years = tiny ? [2024] : [2020, 2021, 2022, 2023, 2024, 2025];
+    const yearFolders = [];
+    for (const y of years) {
+      const monthFolders = [];
+      const months = tiny ? 3 : 12;
+      for (let m = 1; m <= months; m++) {
+        const monthName = new Date(y, m - 1, 1).toLocaleString('en', { month: 'long' });
+        const eventFolders = [];
+        const eventCount = tiny ? 2 : rInt(2, 5);
+        for (let e = 0; e < eventCount; e++) {
+          const eventName = pick(['Trip', 'Birthday', 'Wedding', 'Hike', 'Concert', 'Dinner', 'Beach', 'Workshop', 'Party', 'Family']);
+          const photos = [];
+          const photoCount = tiny ? 20 : rInt(80, 400);
+          for (let p = 0; p < photoCount; p++) {
+            const num = 1000 + p;
+            const r = rand();
+            if (r < 0.70) {
+              photos.push(mkFile(`IMG_${num}.jpg`, szLog(1_500_000, 8_000_000), 'image/jpeg'));
+            } else if (r < 0.95) {
+              photos.push(mkFile(`IMG_${num}.cr2`, szLog(20_000_000, 45_000_000), 'image/x-canon-cr2'));
+            } else {
+              photos.push(mkFile(`VID_${num}.mp4`, szLog(80_000_000, 400_000_000), 'video/mp4'));
+            }
+          }
+          eventFolders.push(mkFolder(`${String(m).padStart(2, '0')}-${e + 1} ${eventName}`, photos));
+        }
+        monthFolders.push(mkFolder(`${String(m).padStart(2, '0')} ${monthName}`, eventFolders));
+      }
+      yearFolders.push(mkFolder(String(y), monthFolders));
+    }
+    children.push(mkFolder('Photos', yearFolders));
+  })();
+
+  // Music (~60 GB)
+  (() => {
+    const artistFolders = [];
+    const artistCount = tiny ? 3 : artists.length;
+    for (let a = 0; a < artistCount; a++) {
+      const albumFolders = [];
+      const albumCount = tiny ? 1 : rInt(2, 6);
+      for (let al = 0; al < albumCount; al++) {
+        const tracks = [];
+        const trackCount = tiny ? 5 : rInt(8, 16);
+        for (let t = 0; t < trackCount; t++) {
+          const num = String(t + 1).padStart(2, '0');
+          const word = pick(trackWords);
+          if (rand() < 0.45) {
+            tracks.push(mkFile(`${num} ${word}.flac`, szLog(25_000_000, 70_000_000), 'audio/flac'));
+          } else {
+            tracks.push(mkFile(`${num} ${word}.mp3`, szLog(4_000_000, 12_000_000), 'audio/mpeg'));
+          }
+        }
+        const albumName = `${pick(albumWords)} ${pick(albumWords)}`;
+        albumFolders.push(mkFolder(albumName, tracks));
+      }
+      artistFolders.push(mkFolder(artists[a], albumFolders));
+    }
+    children.push(mkFolder('Music', artistFolders));
+  })();
+
+  // Backups (~200 GB)
+  (() => {
+    const items = [];
+    const n = tiny ? 4 : 18;
+    for (let i = 0; i < n; i++) {
+      const kind = pick(['laptop_full', 'desktop_full', 'nas_snapshot', 'photos_archive', 'vm_disk']);
+      const ext = pick(['tar.gz', 'zip', '7z', 'img']);
+      items.push(mkFile(`${kind}_2024_${String(i).padStart(2, '0')}.${ext}`,
+        szLog(4_000_000_000, 30_000_000_000),
+        ext === 'zip' ? 'application/zip' : 'application/x-archive'));
+    }
+    children.push(mkFolder('Backups', items));
+  })();
+
+  // Documents (~8 GB)
+  (() => {
+    const folders = [];
+    for (const ws of workspaces) {
+      const items = [];
+      const n = tiny ? 5 : rInt(30, 120);
+      for (let i = 0; i < n; i++) {
+        const r = rand();
+        const name = `${ws.toLowerCase()}_${String(i).padStart(3, '0')}`;
+        if (r < 0.4) {
+          items.push(mkFile(`${name}.pdf`, szLog(200_000, 8_000_000), 'application/pdf'));
+        } else if (r < 0.6) {
+          items.push(mkFile(`${name}.docx`, szLog(30_000, 2_000_000),
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'));
+        } else if (r < 0.75) {
+          items.push(mkFile(`${name}.xlsx`, szLog(40_000, 3_000_000),
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
+        } else if (r < 0.85) {
+          items.push(mkFile(`${name}.pptx`, szLog(500_000, 15_000_000),
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation'));
+        } else {
+          items.push(mkFile(`${name}.md`, szLog(1_000, 80_000), 'text/markdown'));
+        }
+      }
+      folders.push(mkFolder(ws, items));
+    }
+    children.push(mkFolder('Documents', folders));
+  })();
+
+  // Downloads (~40 GB, mixed)
+  (() => {
+    const items = [];
+    const n = tiny ? 12 : 180;
+    for (let i = 0; i < n; i++) {
+      const r = rand();
+      if (r < 0.25) {
+        items.push(mkFile(`installer_${i}.exe`, szLog(20_000_000, 500_000_000), 'application/x-msdownload'));
+      } else if (r < 0.45) {
+        items.push(mkFile(`setup_${i}.dmg`, szLog(50_000_000, 800_000_000), 'application/octet-stream'));
+      } else if (r < 0.65) {
+        items.push(mkFile(`screenshot_${i}.png`, szLog(300_000, 4_000_000), 'image/png'));
+      } else if (r < 0.85) {
+        items.push(mkFile(`archive_${i}.zip`, szLog(5_000_000, 300_000_000), 'application/zip'));
+      } else {
+        items.push(mkFile(`doc_${i}.pdf`, szLog(100_000, 10_000_000), 'application/pdf'));
+      }
+    }
+    children.push(mkFolder('Downloads', items));
+  })();
+
+  // Code (~6 GB, the node_modules classic)
+  (() => {
+    const projectFolders = [];
+    const projectCount = tiny ? 2 : projects.length;
+    for (let p = 0; p < projectCount; p++) {
+      const subfolders = [];
+      const srcFiles = [];
+      const srcN = tiny ? 10 : rInt(40, 160);
+      for (let i = 0; i < srcN; i++) {
+        const ext = pick(['js', 'ts', 'tsx', 'py', 'rs', 'go', 'css']);
+        const mime = ext === 'py' ? 'text/x-python' : 'text/plain';
+        srcFiles.push(mkFile(`module_${String(i).padStart(3, '0')}.${ext}`,
+          szLog(500, 30_000), mime));
+      }
+      subfolders.push(mkFolder('src', srcFiles));
+      if (!tiny) {
+        const nmFolders = [];
+        const pkgCount = rInt(30, 80);
+        for (let pk = 0; pk < pkgCount; pk++) {
+          const pkgFiles = [];
+          const fileCount = rInt(8, 40);
+          for (let f = 0; f < fileCount; f++) {
+            pkgFiles.push(mkFile(`index_${f}.js`, szLog(200, 50_000), 'text/javascript'));
+          }
+          pkgFiles.push(mkFile('package.json', szLog(500, 4_000), 'application/json'));
+          pkgFiles.push(mkFile('README.md', szLog(200, 20_000), 'text/markdown'));
+          nmFolders.push(mkFolder(`pkg-${pk}`, pkgFiles));
+        }
+        subfolders.push(mkFolder('node_modules', nmFolders));
+      }
+      const assets = [];
+      const assetN = tiny ? 3 : rInt(10, 40);
+      for (let i = 0; i < assetN; i++) {
+        assets.push(mkFile(`asset_${i}.png`, szLog(50_000, 2_000_000), 'image/png'));
+      }
+      subfolders.push(mkFolder('assets', assets));
+      projectFolders.push(mkFolder(projects[p], subfolders));
+    }
+    children.push(mkFolder('Code', projectFolders));
+  })();
+
+  const tree = mkFolder('My Drive (demo)', children);
+  tree.id = 'root';
+
+  let fileCount = 0, folderCount = 0;
+  (function walk(n) {
+    if (n.isFolder) { folderCount++; (n.children || []).forEach(walk); }
+    else fileCount++;
+  })(tree);
+
+  return { tree, fileCount, folderCount };
+}
+
+// Mount the demo tree in the main view. Safe to call on pageload (no auth) or
+// after sign-out. The demo strip communicates that this isn't the user's data.
+function loadDemo({ tiny = false } = {}) {
+  const t0 = performance.now();
+  const { tree, fileCount, folderCount } = buildDemoTree({ tiny });
+  const dt = (performance.now() - t0) / 1000;
+  inDemoMode = true;
   els.main.classList.remove('hidden');
   els.intro.classList.add('hidden');
+  if (els.demoStrip) els.demoStrip.classList.remove('hidden');
   currentTree = tree;
   showTree(tree);
-  updateStats(tree, files.filter(f => !f.isFolder).length, files.filter(f => f.isFolder).length, 0);
+  updateStats(tree, fileCount, folderCount, dt);
+  // Ensure the treemap sizes itself correctly after going visible.
+  requestAnimationFrame(() => { if (renderer) renderer.resize(); });
+  console.log(`[demo] ${fileCount.toLocaleString()} files, ${folderCount.toLocaleString()} folders, ${(tree.size / 1024 ** 4).toFixed(2)} TiB in ${dt.toFixed(2)}s`);
+}
+
+// Hide the demo strip; the header Sign in with Google button is already
+// present, so the user keeps a clear path to scan their own Drive.
+function dismissDemoStrip() {
+  if (els.demoStrip) els.demoStrip.classList.add('hidden');
+}
+
+// === Dev harness & landing demo =============================================
+// `?dev=1[&tiny=1]` forces demo mode even if a token is present (useful for
+// screenshots). Otherwise, demo mode is the landing experience for logged-out
+// visitors. Signed-in visitors go straight to the usual empty-pane-until-scan
+// flow via initGIS → onSignedIn.
+{
+  const params = new URLSearchParams(location.search);
+  const forceDev = params.get('dev') === '1';
+  const tiny = params.get('tiny') === '1';
+
+  if (forceDev) {
+    loadDemo({ tiny });
+  } else if (!accessToken) {
+    loadDemo();
+  }
+
+  // "×" dismiss button: hide the strip. Header sign-in is always visible
+  // already, so no need to toggle anything else.
+  if (els.btnDemoDismiss) {
+    els.btnDemoDismiss.addEventListener('click', dismissDemoStrip);
+  }
 }
