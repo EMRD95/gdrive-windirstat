@@ -55,3 +55,9 @@ temp/
 # Drop the file Google gives you into the repo root, it'll be served as-is.
 # We don't want to commit it here since each deploy target has its own.
 google*.html
+
+# === Private working docs (kept locally, never pushed) ===
+# Playbook, shot lists, internal notes — live in /home/ubu/driveStatVerification/
+VIDEO_SCRIPT.md
+SUBMISSION.md
+GOOGLE_VERIFICATION.md
