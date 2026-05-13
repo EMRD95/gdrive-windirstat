@@ -2,7 +2,7 @@
 
 Visualize your Google Drive storage like WinDirStat. See what's eating your space at a glance with an interactive treemap and a live file list — 100% in your browser, nothing uploaded anywhere.
 
-![DriveStat dark theme](docs/screenshot.png)
+![DriveStat dark theme](docs/screenshot-demo.png)
 
 ## Features
 
