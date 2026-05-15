@@ -70,7 +70,7 @@ if (!CAN_WRITE && els.btnDelete) {
   els.btnDelete.style.display = 'none';
 }
 
-let accessToken = null;
+let accessToken = sessionStorage.getItem('ds_access_token');
 let tokenClient = null;
 let renderer = null;
 let currentTree = null;
@@ -121,6 +121,7 @@ function initGIS() {
         return;
       }
       accessToken = resp.access_token;
+      sessionStorage.setItem('ds_access_token', accessToken);
       onSignedIn();
     },
   });
@@ -145,6 +146,7 @@ function initGIS() {
 }
 
 function clearAuth() {
+  sessionStorage.removeItem('ds_access_token');
   accessToken = null;
 }
 
