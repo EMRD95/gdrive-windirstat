@@ -207,8 +207,9 @@ function startAuthPoll() {
   }
 }
 
-function onSignedOut() {
+async function onSignedOut() {
   clearAuth();
+  await clearFiles();
   els.signin.classList.remove('hidden');
   els.signout.classList.add('hidden');
   currentTree = null;
