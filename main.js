@@ -195,7 +195,7 @@ async function onSignedIn() {
   if (await hasCache()) {
     await loadFromCache();
   } else {
-    setStatus('Ready — click Scan Drive to index your Google Drive.');
+    doScan();
   }
 }
 
@@ -1328,6 +1328,7 @@ function loadDemo({ tiny = false } = {}) {
 // present, so the user keeps a clear path to scan their own Drive.
 function dismissDemoStrip() {
   if (els.demoStrip) els.demoStrip.classList.add('hidden');
+  requestAnimationFrame(() => renderer?.resize());
 }
 
 // === Dev harness & landing demo =============================================
