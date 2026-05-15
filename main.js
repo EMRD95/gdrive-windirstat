@@ -70,7 +70,7 @@ if (!CAN_WRITE && els.btnDelete) {
   els.btnDelete.style.display = 'none';
 }
 
-let accessToken = localStorage.getItem('ds_access_token');
+let accessToken = null;
 let tokenClient = null;
 let renderer = null;
 let currentTree = null;
@@ -121,7 +121,6 @@ function initGIS() {
         return;
       }
       accessToken = resp.access_token;
-      localStorage.setItem('ds_access_token', accessToken);
       onSignedIn();
     },
   });
@@ -146,7 +145,6 @@ function initGIS() {
 }
 
 function clearAuth() {
-  localStorage.removeItem('ds_access_token');
   accessToken = null;
 }
 
@@ -199,21 +197,12 @@ async function onSignedIn() {
   }
 }
 
-let pollInterval = null;
+let authPollCount = 0;
 function startAuthPoll() {
-  if (pollInterval) return;
-  let checks = 0;
-  pollInterval = setInterval(() => {
-    checks++;
-    const tok = localStorage.getItem('ds_access_token');
-    if (tok && tok !== accessToken) {
-      accessToken = tok;
-      onSignedIn();
-      clearInterval(pollInterval);
-      pollInterval = null;
-    }
-    if (checks > 30) { clearInterval(pollInterval); pollInterval = null; }
-  }, 500);
+  // Try silent re-authentication instead of relying on localStorage or polling it.
+  if (!accessToken && tokenClient) {
+      tokenClient.requestAccessToken({ prompt: '' }); // Silent refresh
+  }
 }
 
 function onSignedOut() {
