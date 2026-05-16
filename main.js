@@ -17,6 +17,9 @@ const SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
 // flag will flip automatically.
 const CAN_WRITE = SCOPE.endsWith('/auth/drive') || SCOPE.endsWith('/drive.file');
 const DIVIDER_STORAGE_KEY = 'ds_list_pane_height_pct';
+const LEFT_PANE_WIDTH_KEY = 'ds_left_pane_width_pct';
+const LIST_DETAIL_SPLIT_KEY = 'ds_list_detail_split_pct';
+const LAYOUT_KEY = 'ds_layout';
 const TREEMAP_VISIBLE_KEY = 'ds_treemap_visible';
 
 // === DOM refs ===
@@ -30,7 +33,8 @@ const els = {
   search: $('search'),
   btnClearSearch: $('btn-clear-search'),
   btnToggleTreemap: $('btn-toggle-treemap'),
-  btnCloseTreemap: $('btn-close-treemap'),
+  btnToggleLayout: $('btn-toggle-layout'),
+  btnLayoutLabel: $('btn-layout-label'),
   progressArea: $('progress-area'),
   progressBar: $('progress-bar'),
   status: $('status'),
@@ -39,14 +43,12 @@ const els = {
   statFolders: $('stat-folders'),
   statSize: $('stat-size'),
   statTime: $('stat-time'),
-  breadcrumbs: $('breadcrumbs'),
-  btnUp: $('btn-up'),
-  crumbs: $('crumbs'),
   mainPane: $('main-pane'),
   viewList: $('view-list'),
   viewTreemap: $('view-treemap'),
   listBody: $('list-body'),
   paneDivider: $('pane-divider'),
+  listDetailDivider: $('list-detail-divider'),
   infoCard: $('info-card'),
   infoCardTitle: $('info-card-title'),
   infoCardBody: $('info-card-body'),
@@ -60,8 +62,6 @@ const els = {
   btnTheme: $('btn-theme'),
   cookieNotice: $('cookie-notice'),
   cookieAccept: $('cookie-accept'),
-  demoStrip: $('demo-strip'),
-  btnDemoDismiss: $('btn-demo-dismiss'),
 };
 
 // Hide write-only UI (Move to Trash) when the current OAuth scope can't perform
@@ -78,13 +78,18 @@ let selectedNode = null;
 let searchQuery = '';
 let sortState = { col: 'size', dir: 'desc' };
 let treemapVisible = localStorage.getItem(TREEMAP_VISIBLE_KEY) !== '0';
+// Layout override: null = auto (follow viewport), 'horizontal' | 'vertical' = forced
+let layoutOverride = localStorage.getItem(LAYOUT_KEY) || null;
+if (layoutOverride && !['horizontal', 'vertical'].includes(layoutOverride)) {
+  layoutOverride = null;
+}
 // True while the synthetic marketing tree is on-screen. Used to show the demo
 // strip and to reset stats cleanly when the user kicks off a real scan.
 let inDemoMode = false;
 // Tracks which folders are expanded in the list (by node id)
 const expandedFolders = new Set();
 // List-side navigation stack. Treemap stays static on the whole drive;
-// this only drives the list pane + breadcrumbs.
+// this only drives the list pane.
 let listPath = [];
 const listCurrentNode = () => listPath[listPath.length - 1] || currentTree;
 
@@ -155,7 +160,6 @@ async function onSignedIn() {
   // placeholder residue before their real data lands.
   const wasDemo = inDemoMode;
   inDemoMode = false;
-  if (els.demoStrip) els.demoStrip.classList.add('hidden');
   if (wasDemo) {
     currentTree = null;
     selectedNode = null;
@@ -163,7 +167,6 @@ async function onSignedIn() {
     searchQuery = '';
     if (els.search) els.search.value = '';
     if (els.listBody) els.listBody.innerHTML = '';
-    if (els.crumbs) els.crumbs.innerHTML = '';
     if (renderer) {
       renderer.tree = null;
       renderer.hoveredId = null;
@@ -229,43 +232,6 @@ function updateProgress(pct) {
   els.progressBar.style.width = Math.min(100, Math.max(0, pct)) + '%';
 }
 function hideProgress() { els.progressArea.classList.add('hidden'); }
-
-function updateBreadcrumbs() {
-  if (!currentTree) return;
-  els.crumbs.innerHTML = '';
-  // Always show root as first crumb, then listPath
-  const path = listPath.length ? listPath : [currentTree];
-  // On mobile, hide the whole breadcrumbs row when we're at root — "My Drive" alone is noise.
-  // When the user drills into a folder the row reappears so they can navigate up.
-  if (isMobileView() && path.length <= 1) {
-    els.breadcrumbs.classList.add('hidden');
-  } else if (currentTree) {
-    els.breadcrumbs.classList.remove('hidden');
-  }
-  path.forEach((node, idx) => {
-    const span = document.createElement('span');
-    span.className = 'crumb';
-    span.textContent = node.name || 'My Drive';
-    if (idx < path.length - 1) {
-      span.onclick = () => {
-        listPath = path.slice(0, idx + 1);
-        updateBreadcrumbs();
-        renderList();
-        // After jumping up, show the folder we landed in as the context
-        const here = listCurrentNode();
-        if (here) { selectedNode = here; showInfoCard(here); }
-        else hideInfoCard();
-      };
-    }
-    els.crumbs.appendChild(span);
-    if (idx < path.length - 1) {
-      const sep = document.createElement('span');
-      sep.className = 'sep'; sep.textContent = '/';
-      sep.style.pointerEvents = 'none';
-      els.crumbs.appendChild(sep);
-    }
-  });
-}
 
 function updateStats(tree, fileCount, folderCount, timeSec) {
   els.statsBar.classList.remove('hidden');
@@ -521,6 +487,56 @@ function setTreemapVisible(visible) {
   applyTreemapVisibility();
 }
 
+// === Layout toggle (horizontal / vertical) ===
+function getAutoLayout() {
+  if (isMobileView()) return 'mobile';
+  return 'vertical';
+}
+
+function getEffectiveLayout() {
+  if (isMobileView()) return 'mobile';
+  if (layoutOverride) return layoutOverride;
+  return getAutoLayout();
+}
+
+function applyLayout() {
+  const layout = getEffectiveLayout();
+  if (layout === 'horizontal') {
+    els.mainPane.dataset.layout = 'horizontal';
+  } else {
+    delete els.mainPane.dataset.layout;
+  }
+  updateLayoutButton();
+}
+
+function updateLayoutButton() {
+  if (!els.btnToggleLayout || !els.btnLayoutLabel) return;
+  const layout = getEffectiveLayout();
+  if (layout === 'mobile') {
+    els.btnToggleLayout.style.display = 'none';
+  } else {
+    els.btnToggleLayout.style.display = '';
+    els.btnLayoutLabel.textContent = layout === 'horizontal' ? 'Horizontal' : 'Vertical';
+    // Active = user has set a manual override (not auto)
+    els.btnToggleLayout.classList.toggle('active', !!layoutOverride);
+  }
+}
+
+function toggleLayout() {
+  if (isMobileView()) return;
+  if (layoutOverride) {
+    // Override is set — clear it, go back to auto
+    layoutOverride = null;
+    localStorage.removeItem(LAYOUT_KEY);
+  } else {
+    // No override — set to opposite of what auto would give us
+    layoutOverride = getAutoLayout() === 'horizontal' ? 'vertical' : 'horizontal';
+    localStorage.setItem(LAYOUT_KEY, layoutOverride);
+  }
+  applyLayout();
+  requestAnimationFrame(() => renderer?.resize());
+}
+
 // === Mobile layout ===
 const MOBILE_BREAKPOINT = 720;
 function isMobileView() {
@@ -566,11 +582,23 @@ function initMobile() {
       // Reset mobile-only state so desktop isn't affected
       els.infoCard.classList.remove('sheet-open');
     } else {
+      // Mobile mode: nuke all inline size styles — absolute positioning handles sizing
+      els.viewList.style.removeProperty('height');
+      els.viewList.style.removeProperty('width');
+      els.infoCard.style.removeProperty('height');
       // Ensure a valid data-mobile-view attribute
       if (!els.mainPane.dataset.mobileView) els.mainPane.dataset.mobileView = 'list';
     }
-    // Re-evaluate breadcrumbs visibility (mobile hides when at root)
-    if (currentTree) updateBreadcrumbs();
+    // Apply layout (data-layout attribute) BEFORE checking flexDirection
+    applyLayout();
+    // Clean up inline styles from the OTHER layout now that computed style is final
+    if (!mobile) {
+      const isRow = getComputedStyle(els.mainPane).flexDirection === 'row';
+      if (!isRow) {
+        // Desktop (vertical): nuke leftover laptop width
+        els.viewList.style.removeProperty('width');
+      }
+    }
     requestAnimationFrame(() => renderer?.resize());
   };
   applyMobileMode();
@@ -578,37 +606,60 @@ function initMobile() {
   window.addEventListener('orientationchange', applyMobileMode);
 }
 
-// === Draggable divider ===
+// === Draggable divider (pane-divider: top/bottom on desktop, left/right on laptop) ===
 function initDivider() {
-  const saved = parseFloat(localStorage.getItem(DIVIDER_STORAGE_KEY));
-  if (!Number.isNaN(saved) && saved > 10 && saved < 90) {
-    els.viewList.style.height = saved + '%';
+  // Restore persisted positions for both layouts
+  const savedHeight = parseFloat(localStorage.getItem(DIVIDER_STORAGE_KEY));
+  if (!Number.isNaN(savedHeight) && savedHeight > 10 && savedHeight < 90) {
+    els.viewList.style.height = savedHeight + '%';
+  }
+  const savedWidth = parseFloat(localStorage.getItem(LEFT_PANE_WIDTH_KEY));
+  if (!Number.isNaN(savedWidth) && savedWidth > 20 && savedWidth < 80) {
+    els.viewList.style.width = savedWidth + '%';
   }
 
   let dragging = false;
-  let startY = 0;
-  let startListHeight = 0;
-  let paneHeight = 0;
+  let startX = 0, startY = 0;
+  let startSize = 0;
+  let paneSize = 0;
+  let isRowLayout = false; // true = laptop (left/right), false = desktop (top/bottom)
 
   const onDown = (e) => {
     dragging = true;
+    isRowLayout = getComputedStyle(els.mainPane).flexDirection === 'row';
+    startX = e.clientX;
     startY = e.clientY;
-    startListHeight = els.viewList.getBoundingClientRect().height;
-    paneHeight = els.mainPane.getBoundingClientRect().height;
+    if (isRowLayout) {
+      startSize = els.viewList.getBoundingClientRect().width;
+      paneSize = els.mainPane.getBoundingClientRect().width;
+    } else {
+      startSize = els.viewList.getBoundingClientRect().height;
+      paneSize = els.mainPane.getBoundingClientRect().height;
+    }
     els.paneDivider.classList.add('dragging');
-    document.body.classList.add('dragging-divider');
+    document.body.classList.add(isRowLayout ? 'dragging-col-divider' : 'dragging-divider');
     e.preventDefault();
   };
 
   const onMove = (e) => {
     if (!dragging) return;
-    const dy = e.clientY - startY;
-    let newListHeight = startListHeight + dy;
-    const minH = 80;
-    const maxH = paneHeight - 80 - 6; // reserve 80px for treemap + 6 for divider
-    newListHeight = Math.max(minH, Math.min(maxH, newListHeight));
-    const pct = (newListHeight / paneHeight) * 100;
-    els.viewList.style.height = pct + '%';
+    if (isRowLayout) {
+      const dx = e.clientX - startX;
+      let newW = startSize + dx;
+      const minW = 280;
+      const maxW = paneSize - 200 - 6;
+      newW = Math.max(minW, Math.min(maxW, newW));
+      const pct = (newW / paneSize) * 100;
+      els.viewList.style.width = pct + '%';
+    } else {
+      const dy = e.clientY - startY;
+      let newH = startSize + dy;
+      const minH = 80;
+      const maxH = paneSize - 80 - 6;
+      newH = Math.max(minH, Math.min(maxH, newH));
+      const pct = (newH / paneSize) * 100;
+      els.viewList.style.height = pct + '%';
+    }
     renderer?.resize();
   };
 
@@ -616,10 +667,14 @@ function initDivider() {
     if (!dragging) return;
     dragging = false;
     els.paneDivider.classList.remove('dragging');
-    document.body.classList.remove('dragging-divider');
-    // Persist
-    const pct = (els.viewList.getBoundingClientRect().height / els.mainPane.getBoundingClientRect().height) * 100;
-    localStorage.setItem(DIVIDER_STORAGE_KEY, pct.toFixed(1));
+    document.body.classList.remove('dragging-divider', 'dragging-col-divider');
+    if (isRowLayout) {
+      const pct = (els.viewList.getBoundingClientRect().width / els.mainPane.getBoundingClientRect().width) * 100;
+      localStorage.setItem(LEFT_PANE_WIDTH_KEY, pct.toFixed(1));
+    } else {
+      const pct = (els.viewList.getBoundingClientRect().height / els.mainPane.getBoundingClientRect().height) * 100;
+      localStorage.setItem(DIVIDER_STORAGE_KEY, pct.toFixed(1));
+    }
   };
 
   els.paneDivider.addEventListener('mousedown', onDown);
@@ -628,6 +683,82 @@ function initDivider() {
 
   // Touch
   els.paneDivider.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    onDown({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, preventDefault: () => e.preventDefault() });
+  }, { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    if (!dragging || e.touches.length !== 1) return;
+    onMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+  }, { passive: true });
+  document.addEventListener('touchend', onUp);
+  document.addEventListener('touchcancel', onUp);
+
+  // Double-click to reset
+  els.paneDivider.addEventListener('dblclick', () => {
+    const isRow = getComputedStyle(els.mainPane).flexDirection === 'row';
+    if (isRow) {
+      els.viewList.style.width = '48%';
+      localStorage.setItem(LEFT_PANE_WIDTH_KEY, '48');
+    } else {
+      els.viewList.style.height = '45%';
+      localStorage.setItem(DIVIDER_STORAGE_KEY, '45');
+    }
+    renderer?.resize();
+  });
+}
+
+// === Draggable divider between file list and details (laptop mode only) ===
+function initListDetailDivider() {
+  if (!els.listDetailDivider) return;
+
+  const saved = parseFloat(localStorage.getItem(LIST_DETAIL_SPLIT_KEY));
+  if (!Number.isNaN(saved) && saved > 15 && saved < 85) {
+    els.infoCard.style.height = saved + '%';
+  }
+
+  let dragging = false;
+  let startY = 0;
+  let startDetailHeight = 0;
+  let paneBodyHeight = 0;
+
+  const onDown = (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startDetailHeight = els.infoCard.getBoundingClientRect().height;
+    paneBodyHeight = els.listDetailDivider.parentElement.getBoundingClientRect().height;
+    els.listDetailDivider.classList.add('dragging');
+    document.body.classList.add('dragging-divider');
+    e.preventDefault();
+  };
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    // Dragging up = details get taller; dragging down = details get shorter
+    const dy = startY - e.clientY;
+    let newH = startDetailHeight + dy;
+    const minH = 100;
+    const maxH = paneBodyHeight - 120 - 6; // reserve for file list
+    newH = Math.max(minH, Math.min(maxH, newH));
+    const pct = (newH / paneBodyHeight) * 100;
+    els.infoCard.style.height = pct + '%';
+    renderer?.resize();
+  };
+
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    els.listDetailDivider.classList.remove('dragging');
+    document.body.classList.remove('dragging-divider');
+    const pct = (els.infoCard.getBoundingClientRect().height / els.listDetailDivider.parentElement.getBoundingClientRect().height) * 100;
+    localStorage.setItem(LIST_DETAIL_SPLIT_KEY, pct.toFixed(1));
+  };
+
+  els.listDetailDivider.addEventListener('mousedown', onDown);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+
+  // Touch
+  els.listDetailDivider.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) return;
     onDown({ clientY: e.touches[0].clientY, preventDefault: () => e.preventDefault() });
   }, { passive: false });
@@ -638,10 +769,10 @@ function initDivider() {
   document.addEventListener('touchend', onUp);
   document.addEventListener('touchcancel', onUp);
 
-  // Double-click to reset to 45/55
-  els.paneDivider.addEventListener('dblclick', () => {
-    els.viewList.style.height = '45%';
-    localStorage.setItem(DIVIDER_STORAGE_KEY, '45');
+  // Double-click to reset
+  els.listDetailDivider.addEventListener('dblclick', () => {
+    els.infoCard.style.height = '30%';
+    localStorage.setItem(LIST_DETAIL_SPLIT_KEY, '30');
     renderer?.resize();
   });
 }
@@ -740,7 +871,6 @@ async function loadFromCache() {
 }
 
 function showTree(tree) {
-  els.breadcrumbs.classList.remove('hidden');
   listPath = [tree];
   if (!renderer) {
     renderer = new TreemapRenderer(els.canvas);
@@ -753,7 +883,6 @@ function showTree(tree) {
     window.addEventListener('resize', () => renderer.resize());
   }
   renderer.setTree(tree);
-  updateBreadcrumbs();
   renderList();
 }
 
@@ -772,7 +901,7 @@ els.btnClearSearch.addEventListener('click', () => {
 
 // === Treemap toggle ===
 els.btnToggleTreemap.addEventListener('click', () => setTreemapVisible(!treemapVisible));
-els.btnCloseTreemap.addEventListener('click', () => setTreemapVisible(false));
+els.btnToggleLayout.addEventListener('click', toggleLayout);
 
 // === Info card actions ===
 els.btnOpenDrive.addEventListener('click', () => {
@@ -841,7 +970,6 @@ document.addEventListener('keydown', (e) => {
 function goUpList() {
   if (listPath.length <= 1) return;
   listPath.pop();
-  updateBreadcrumbs();
   renderList();
   const here = listCurrentNode();
   if (here) { selectedNode = here; showInfoCard(here); }
@@ -857,7 +985,6 @@ els.signout.addEventListener('click', () => {
 });
 els.btnScan.addEventListener('click', doScan);
 els.btnExport.addEventListener('click', doExport);
-els.btnUp.addEventListener('click', () => goUpList());
 
 // === Sort handlers ===
 document.querySelectorAll('.list-header .sortable').forEach(el => {
@@ -903,7 +1030,6 @@ els.listBody.addEventListener('dblclick', (e) => {
   if (node && node.isFolder && node.children?.length) {
     // Drill into this folder — list only; treemap stays static on the full drive
     listPath.push(node);
-    updateBreadcrumbs();
     renderList();
     selectedNode = node;
     showInfoCard(node);
@@ -991,7 +1117,9 @@ function initCookieNotice() {
 
 // === Init ===
 applyTreemapVisibility();
+applyLayout();
 initDivider();
+initListDetailDivider();
 initMobile();
 initTheme();
 initCookieNotice();
@@ -1299,7 +1427,7 @@ function buildDemoTree({ tiny = false } = {}) {
 }
 
 // Mount the demo tree in the main view. Safe to call on pageload (no auth) or
-// after sign-out. The demo strip communicates that this isn't the user's data.
+// after sign-out. Injects a subtle dismissable notice into the file list.
 function loadDemo({ tiny = false } = {}) {
   const t0 = performance.now();
   const { tree, fileCount, folderCount } = buildDemoTree({ tiny });
@@ -1307,20 +1435,33 @@ function loadDemo({ tiny = false } = {}) {
   inDemoMode = true;
   els.main.classList.remove('hidden');
   els.intro.classList.add('hidden');
-  if (els.demoStrip) els.demoStrip.classList.remove('hidden');
   currentTree = tree;
   showTree(tree);
   updateStats(tree, fileCount, folderCount, dt);
+  // Inject demo notice at the top of the file list
+  injectDemoNotice();
   // Ensure the treemap sizes itself correctly after going visible.
   requestAnimationFrame(() => { if (renderer) renderer.resize(); });
   console.log(`[demo] ${fileCount.toLocaleString()} files, ${folderCount.toLocaleString()} folders, ${(tree.size / 1024 ** 4).toFixed(2)} TiB in ${dt.toFixed(2)}s`);
 }
 
-// Hide the demo strip; the header Sign in with Google button is already
-// present, so the user keeps a clear path to scan their own Drive.
-function dismissDemoStrip() {
-  if (els.demoStrip) els.demoStrip.classList.add('hidden');
-  requestAnimationFrame(() => renderer?.resize());
+// Inject a subtle dismissable banner into list-body so the user knows
+// they're looking at synthetic data. Dismissing it removes it for the session.
+function injectDemoNotice() {
+  if (!els.listBody) return;
+  // Don't double-inject
+  if (els.listBody.querySelector('.demo-notice')) return;
+  const notice = document.createElement('div');
+  notice.className = 'demo-notice';
+  notice.innerHTML = `
+    <span class="demo-notice-text"><strong>Synthetic demo data</strong> — sign in to scan your own Google Drive.</span>
+    <button class="demo-notice-dismiss" title="Dismiss" aria-label="Dismiss demo notice">×</button>
+  `;
+  notice.querySelector('.demo-notice-dismiss').addEventListener('click', () => {
+    notice.remove();
+    requestAnimationFrame(() => renderer?.resize());
+  });
+  els.listBody.prepend(notice);
 }
 
 // === Dev harness & landing demo =============================================
@@ -1337,11 +1478,5 @@ function dismissDemoStrip() {
     loadDemo({ tiny });
   } else if (!accessToken) {
     loadDemo();
-  }
-
-  // "×" dismiss button: hide the strip. Header sign-in is always visible
-  // already, so no need to toggle anything else.
-  if (els.btnDemoDismiss) {
-    els.btnDemoDismiss.addEventListener('click', dismissDemoStrip);
   }
 }

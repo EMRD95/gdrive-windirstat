@@ -169,23 +169,6 @@ button { cursor: pointer; border: none; font-size: 0.85rem; display: inline-flex
 }
 #main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-/* Breadcrumbs */
-.breadcrumbs {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 16px; background: var(--bg-0);
-  border-bottom: 1px solid var(--bg-3);
-  font-size: 0.85rem; flex-shrink: 0;
-}
-.crumbs { display: flex; align-items: center; gap: 4px; overflow: hidden; }
-.crumbs .crumb {
-  color: var(--accent); cursor: pointer; padding: 2px 6px; border-radius: 4px;
-  white-space: nowrap;
-}
-.crumbs .crumb:hover { background: var(--bg-2); text-decoration: underline; }
-.crumbs .crumb:last-child { color: var(--fg-0); cursor: default; text-decoration: none; }
-.crumbs .crumb:last-child:hover { background: transparent; }
-.crumbs .sep { color: var(--fg-2); font-size: 0.75rem; }
-
 /* Main pane: vertical stack (list on top, divider, treemap on bottom) */
 .main-pane {
   flex: 1; min-height: 0;
@@ -248,6 +231,31 @@ button { cursor: pointer; border: none; font-size: 0.85rem; display: inline-flex
 .pane-divider:hover .pane-divider-grip,
 .pane-divider.dragging .pane-divider-grip { background: #fff; opacity: 1; }
 
+/* Divider between file list and details — hidden on desktop, shown in laptop mode */
+.list-detail-divider {
+  flex: 0 0 6px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--bg-3);
+  border-bottom: 1px solid var(--bg-3);
+  cursor: row-resize;
+  position: relative;
+  user-select: none;
+  display: none; /* hidden by default, CSS media query shows it */
+  transition: background 0.15s ease;
+}
+.list-detail-divider:hover, .list-detail-divider.dragging { background: var(--accent); }
+.list-detail-divider .pane-divider-grip {
+  position: absolute;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 32px; height: 2px;
+  background: var(--fg-2);
+  border-radius: 1px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.list-detail-divider:hover .pane-divider-grip,
+.list-detail-divider.dragging .pane-divider-grip { background: #fff; opacity: 1; }
+
 /* Treemap pane (bottom) */
 #view-treemap {
   flex: 1 1 auto;
@@ -255,17 +263,7 @@ button { cursor: pointer; border: none; font-size: 0.85rem; display: inline-flex
   display: flex; flex-direction: column;
   overflow: hidden;
 }
-.treemap-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 12px;
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--bg-3);
-  flex-shrink: 0;
-}
-.treemap-title { font-size: 0.82rem; color: var(--fg-2); font-weight: 500; }
-.treemap-hint { color: var(--fg-2); opacity: 0.6; font-weight: 400; margin-left: 6px; font-size: 0.72rem; }
-
-/* Treemap body: single area now (sidebar moved to the list pane above) */
+/* Treemap body */
 .treemap-body {
   flex: 1; min-height: 0;
   position: relative;
@@ -453,51 +451,28 @@ button { cursor: pointer; border: none; font-size: 0.85rem; display: inline-flex
 .intro-card .sub { font-size: 0.8rem; color: var(--fg-2); opacity: 0.7; }
 
 /* ==========================================================================
-   Demo mode strip — shown above the main view when synthetic data is loaded
+   Demo notice — injected into list-body when synthetic data is loaded
    ========================================================================== */
-.demo-strip {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 18%, var(--bg-1)), var(--bg-1));
+.demo-notice {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; margin: 0;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-1));
   border-bottom: 1px solid var(--bg-3);
-  font-size: 0.85rem; color: var(--fg-1);
-  flex-shrink: 0;
-  padding-left: calc(16px + env(safe-area-inset-left, 0px));
-  padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  font-size: 0.82rem; color: var(--fg-1);
+  line-height: 1.4;
 }
-.demo-strip.hidden { display: none; }
-.demo-strip .demo-text { flex: 1; line-height: 1.4; }
-.demo-strip .demo-text strong { color: var(--fg-0); letter-spacing: 0.01em; }
-.demo-strip .demo-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--accent); flex-shrink: 0;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
-  animation: demoPulse 2s ease-in-out infinite;
-}
-.demo-strip .btn-demo-cta { flex-shrink: 0; }
-.demo-strip .demo-dismiss {
+.demo-notice-text { flex: 1; }
+.demo-notice-text strong { color: var(--fg-0); }
+.demo-notice-dismiss {
   flex-shrink: 0;
-  width: 28px; height: 28px;
+  width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; color: var(--fg-2);
-  border: 1px solid transparent; border-radius: var(--radius);
-  font-size: 1.1rem; line-height: 1; cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  border: 1px solid transparent; border-radius: 4px;
+  font-size: 1rem; line-height: 1; cursor: pointer;
 }
-.demo-strip .demo-dismiss:hover {
-  background: var(--bg-2); color: var(--fg-0); border-color: var(--bg-3);
-}
-.demo-strip .demo-dismiss:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
-}
-@keyframes demoPulse {
-  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); }
-  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 10%, transparent); }
-}
-@media (max-width: 640px) {
-  .demo-strip { flex-wrap: wrap; padding: 10px 12px; }
-  .demo-strip .demo-text { font-size: 0.8rem; flex-basis: 100%; }
-  .demo-strip .btn-demo-cta { width: 100%; }
+.demo-notice-dismiss:hover {
+  background: var(--bg-2); color: var(--fg-0);
 }
 
 /* Toast */
@@ -529,6 +504,8 @@ button { cursor: pointer; border: none; font-size: 0.85rem; display: inline-flex
 /* While dragging the divider, prevent text selection everywhere */
 body.dragging-divider { user-select: none; cursor: row-resize !important; }
 body.dragging-divider * { cursor: row-resize !important; }
+body.dragging-col-divider { user-select: none; cursor: col-resize !important; }
+body.dragging-col-divider * { cursor: col-resize !important; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -560,16 +537,11 @@ body.dragging-divider * { cursor: row-resize !important; }
     padding: 9px 12px; font-size: 0.85rem;
   }
   /* Hide the desktop treemap toggle — mobile uses the tab bar instead */
-  #btn-toggle-treemap { display: none; }
+  #btn-toggle-treemap, #btn-toggle-layout { display: none; }
 
   /* Stats: scrollable chip row */
   .stats-bar { padding: 6px 10px; gap: 6px; }
   .stat-chip { font-size: 0.75rem; padding: 4px 10px; }
-
-  /* Breadcrumbs: single line, horizontally scrollable */
-  .breadcrumbs { padding: 6px 10px; font-size: 0.8rem; }
-  .crumbs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .crumbs::-webkit-scrollbar { display: none; }
 
   /* Main pane: single stage driven by data-mobile-view (NOT column split) */
   .main-pane {
@@ -581,8 +553,9 @@ body.dragging-divider * { cursor: row-resize !important; }
 
   /* Each view is a full-stage absolute panel; only the active one shows */
   #view-list, #view-treemap {
-    position: absolute; inset: 0;
-    height: auto !important;
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     flex: none;
     display: flex;
   }
@@ -648,18 +621,14 @@ body.dragging-divider * { cursor: row-resize !important; }
     padding: 11px 12px; font-size: 0.88rem;
   }
 
-  /* Treemap pane: hide header + legend on mobile (tab bar already labels it) */
-  .treemap-header { display: none; }
+  /* Treemap: hide legend on mobile */
   .legend { display: none; }
 
-  /* Mobile tab bar */
+  /* Mobile tab bar — sits above content, below stats */
   .mobile-tabs {
     display: flex;
-    position: sticky; bottom: 0;
     background: var(--bg-1);
-    border-top: 1px solid var(--bg-3);
-    z-index: 40;
-    padding-bottom: env(safe-area-inset-bottom, 0);
+    border-bottom: 1px solid var(--bg-3);
     flex-shrink: 0;
   }
   .mobile-tab {
@@ -671,10 +640,10 @@ body.dragging-divider * { cursor: row-resize !important; }
     background: transparent;
     color: var(--fg-2);
     font-size: 0.7rem; font-weight: 500;
-    border: none; border-top: 2px solid transparent;
-    min-height: 52px;
+    border: none; border-bottom: 2px solid transparent;
+    min-height: 48px;
   }
-  .mobile-tab.active { color: var(--accent); border-top-color: var(--accent); }
+  .mobile-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .mobile-tab svg { stroke-width: 2; }
 
   /* Intro card: full bleed */
@@ -685,17 +654,73 @@ body.dragging-divider * { cursor: row-resize !important; }
 /* By default the close-details button is only visible in the mobile sheet */
 .btn-close-details { display: none; }
 
-/* Desktop fallback for 720 < viewport <= 960: keep column stack for list/sidebar */
-@media (min-width: 721px) and (max-width: 960px) {
-  .list-header, .list-row { grid-template-columns: 1fr 80px 100px; }
-  .col-type, .col-date { display: none; }
-  .list-pane-body { flex-direction: column; }
-  .list-sidebar {
-    flex: 0 0 200px; min-width: 0; max-width: none;
-    border-left: none; border-top: 1px solid var(--bg-3);
+/* ==========================================================================
+   Manual layout override — user-chosen horizontal/vertical at any width >720px
+   ========================================================================== */
+@media (min-width: 721px) {
+  .main-pane[data-layout="horizontal"] {
+    flex-direction: row;
   }
-  .list-sidebar .info-card-actions { flex-direction: row; }
-  .legend { display: none; }
+  .main-pane[data-layout="horizontal"] #view-list {
+    flex: 0 0 auto;
+    width: 48%;
+    height: 100% !important;
+    min-width: 280px;
+  }
+  .main-pane[data-layout="horizontal"] .list-pane-body {
+    flex-direction: column;
+  }
+  .main-pane[data-layout="horizontal"] .list-main {
+    flex: 1 1 auto;
+    min-height: 120px;
+  }
+  .main-pane[data-layout="horizontal"] .list-detail-divider {
+    display: flex;
+  }
+  .main-pane[data-layout="horizontal"] .list-sidebar {
+    flex: 0 0 auto;
+    height: 30%;
+    min-height: 140px;
+    min-width: 0;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--bg-3);
+  }
+  .main-pane[data-layout="horizontal"] .list-sidebar .info-card-actions {
+    flex-direction: row;
+  }
+  .main-pane[data-layout="horizontal"] .pane-divider {
+    flex: 0 0 6px;
+    width: 6px;
+    border-top: none;
+    border-bottom: none;
+    border-left: 1px solid var(--bg-3);
+    border-right: 1px solid var(--bg-3);
+    cursor: col-resize;
+  }
+  .main-pane[data-layout="horizontal"] .pane-divider .pane-divider-grip {
+    width: 2px;
+    height: 32px;
+  }
+  .main-pane[data-layout="horizontal"] #view-treemap {
+    flex: 1 1 auto;
+    min-width: 200px;
+  }
+  .main-pane[data-layout="horizontal"].treemap-hidden #view-list {
+    flex: 1 1 auto;
+    width: auto;
+  }
+  .main-pane[data-layout="horizontal"] .list-header,
+  .main-pane[data-layout="horizontal"] .list-row {
+    grid-template-columns: 1fr 80px 100px;
+  }
+  .main-pane[data-layout="horizontal"] .col-type,
+  .main-pane[data-layout="horizontal"] .col-date {
+    display: none;
+  }
+  .main-pane[data-layout="horizontal"] .legend {
+    display: none;
+  }
 }
 
 /* ==========================================================================
@@ -777,7 +802,7 @@ body.dragging-divider * { cursor: row-resize !important; }
 @media (max-width: 720px) {
   .cookie-notice {
     left: 8px; right: 8px;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px) + 60px); /* above tab bar */
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     flex-direction: column; align-items: stretch;
     gap: 10px; padding: 12px 14px;
   }
