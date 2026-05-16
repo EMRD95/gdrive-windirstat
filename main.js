@@ -503,8 +503,12 @@ function applyLayout() {
   const layout = getEffectiveLayout();
   if (layout === 'horizontal') {
     els.mainPane.dataset.layout = 'horizontal';
+    // CSS height:100%!important handles vertical leftover, but nuke it explicitly
+    els.viewList.style.removeProperty('height');
   } else {
     delete els.mainPane.dataset.layout;
+    // Clean up horizontal-mode inline width so list-main fills properly
+    els.viewList.style.removeProperty('width');
   }
   updateLayoutButton();
 }
