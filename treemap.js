@@ -195,6 +195,40 @@ export class TreemapRenderer {
     this.cushionBrightness = 0.95;
     this.cushionPaletteBrightness = 0.6;
     this._bindEvents();
+    this._initAutoResize();
+  }
+
+  // ResizeObserver on the canvas parent (.treemap-body) so the treemap
+  // automatically re-lays out whenever its container gets non-zero
+  // dimensions — e.g. after pane visibility toggles (mobile tab switch,
+  // treemap-hidden toggle, divider drag, orientation change).
+  _initAutoResize() {
+    if (typeof ResizeObserver === 'undefined') {
+      // Polyfill-free fallback: window.resize listener is already wired
+      // by main.js.  This only affects ancient browsers.
+      return;
+    }
+    const parent = this.canvas.parentElement;
+    if (!parent) return;
+    // Debounce: skip resize calls that arrive faster than 16 ms (~60 fps)
+    let rafId = null;
+    this._ro = new ResizeObserver((entries) => {
+      // If a frame is already queued, don't stack another one.
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        // Bail if the canvas is already the right size — avoids redundant
+        // re-layouts when the parent hasn't actually changed (e.g. window
+        // resize fired but the pane dimensions are unchanged).
+        const rect = parent.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) return;
+        const w = Math.floor(rect.width * this.dpr);
+        const h = Math.floor(rect.height * this.dpr);
+        if (this.canvas.width === w && this.canvas.height === h) return;
+        this.resize();
+      });
+    });
+    this._ro.observe(parent);
   }
 
   // Read the legend background color from the CSS variable so the treemap's
