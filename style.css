@@ -678,8 +678,7 @@ body.dragging-col-divider * { cursor: col-resize !important; }
     display: flex;
   }
   .main-pane[data-layout="horizontal"] .list-sidebar {
-    flex: 0 0 auto;
-    height: 30%;
+    flex: 1 1 auto;
     min-height: 140px;
     min-width: 0;
     max-width: none;
