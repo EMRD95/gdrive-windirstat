@@ -774,7 +774,13 @@ body.dragging-col-divider * { cursor: col-resize !important; }
 .app-footer .footer-sep { opacity: 0.5; }
 
 @media (max-width: 720px) {
-  .app-footer { display: none; } /* mobile uses tab bar; legal links stay in intro */
+  .app-footer {
+    padding: 6px 12px;
+    font-size: 0.7rem;
+    gap: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    flex-wrap: wrap;
+  }
 }
 
 /* ==========================================================================
