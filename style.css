@@ -231,23 +231,23 @@ button { cursor: pointer; border: none; font-size: 0.85rem; display: inline-flex
 .pane-divider:hover .pane-divider-grip,
 .pane-divider.dragging .pane-divider-grip { background: #fff; opacity: 1; }
 
-/* Divider between file list and details — hidden on desktop, shown in laptop mode */
+/* Divider between file list and details — orientation adapts to parent flex-direction */
 .list-detail-divider {
   flex: 0 0 6px;
+  width: 6px;
   background: var(--bg-1);
-  border-top: 1px solid var(--bg-3);
-  border-bottom: 1px solid var(--bg-3);
-  cursor: row-resize;
+  border-left: 1px solid var(--bg-3);
+  border-right: 1px solid var(--bg-3);
+  cursor: col-resize;
   position: relative;
   user-select: none;
-  display: none; /* hidden by default, CSS media query shows it */
   transition: background 0.15s ease;
 }
 .list-detail-divider:hover, .list-detail-divider.dragging { background: var(--accent); }
 .list-detail-divider .pane-divider-grip {
   position: absolute;
   left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 32px; height: 2px;
+  width: 2px; height: 32px;
   background: var(--fg-2);
   border-radius: 1px;
   opacity: 0.5;
@@ -568,6 +568,7 @@ body.dragging-col-divider * { cursor: col-resize !important; }
   /* List pane: full bleed, no side sidebar */
   .list-pane-body { flex-direction: column; }
   .list-main { flex: 1 1 auto; }
+  .list-detail-divider { display: none; }
   .list-header, .list-row {
     grid-template-columns: 1fr 90px 56px;
     gap: 8px; padding: 10px 12px;
@@ -656,8 +657,8 @@ body.dragging-col-divider * { cursor: col-resize !important; }
 
 /* ==========================================================================
    Manual layout override — user-chosen horizontal/vertical at any width >720px
+   (Gated by data-layout attr, set only when JS detects >720px and user toggles.)
    ========================================================================== */
-@media (min-width: 721px) {
   .main-pane[data-layout="horizontal"] {
     flex-direction: row;
   }
@@ -671,15 +672,23 @@ body.dragging-col-divider * { cursor: col-resize !important; }
     flex-direction: column;
   }
   .main-pane[data-layout="horizontal"] .list-main {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 120px;
   }
   .main-pane[data-layout="horizontal"] .list-detail-divider {
-    display: flex;
+    width: auto;
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--bg-3);
+    border-bottom: 1px solid var(--bg-3);
+    cursor: row-resize;
+  }
+  .main-pane[data-layout="horizontal"] .list-detail-divider .pane-divider-grip {
+    width: 32px;
+    height: 2px;
   }
   .main-pane[data-layout="horizontal"] .list-sidebar {
-    flex: 0 0 auto;
-    height: 30%;
+    flex: 1 1 0;
     min-height: 140px;
     min-width: 0;
     max-width: none;
@@ -721,7 +730,6 @@ body.dragging-col-divider * { cursor: col-resize !important; }
   .main-pane[data-layout="horizontal"] .legend {
     display: none;
   }
-}
 
 /* ==========================================================================
    Theme toggle button

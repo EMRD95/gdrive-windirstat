@@ -19,6 +19,7 @@ const CAN_WRITE = SCOPE.endsWith('/auth/drive') || SCOPE.endsWith('/drive.file')
 const DIVIDER_STORAGE_KEY = 'ds_list_pane_height_pct';
 const LEFT_PANE_WIDTH_KEY = 'ds_left_pane_width_pct';
 const LIST_DETAIL_SPLIT_KEY = 'ds_list_detail_split_pct';
+const LIST_DETAIL_SPLIT_V_KEY = 'ds_list_detail_split_v_pct';
 const LAYOUT_KEY = 'ds_layout';
 const TREEMAP_VISIBLE_KEY = 'ds_treemap_visible';
 
@@ -503,8 +504,14 @@ function applyLayout() {
   const layout = getEffectiveLayout();
   if (layout === 'horizontal') {
     els.mainPane.dataset.layout = 'horizontal';
+    // Clean up vertical-mode inline dimensions so they don't leak
+    els.viewList.style.removeProperty('height');
+    els.infoCard.style.removeProperty('flex');
   } else {
-    delete els.mainPane.dataset.layout;
+    els.mainPane.removeAttribute('data-layout');
+    // Clean up horizontal-mode inline dimensions so they don't leak
+    els.viewList.style.removeProperty('width');
+    els.infoCard.style.removeProperty('flex');
   }
   updateLayoutButton();
 }
@@ -586,6 +593,9 @@ function initMobile() {
       els.viewList.style.removeProperty('height');
       els.viewList.style.removeProperty('width');
       els.infoCard.style.removeProperty('height');
+      els.infoCard.style.removeProperty('width');
+      els.infoCard.style.removeProperty('flexGrow');
+      els.infoCard.style.removeProperty('flex');
       // Ensure a valid data-mobile-view attribute
       if (!els.mainPane.dataset.mobileView) els.mainPane.dataset.mobileView = 'list';
     }
@@ -707,40 +717,69 @@ function initDivider() {
   });
 }
 
-// === Draggable divider between file list and details (laptop mode only) ===
+// === Draggable divider between file list and details ===
+// Orientation-aware: col-resize when parent is row (vertical mode — drag left/right),
+// row-resize when parent is column (horizontal mode — drag up/down).
 function initListDetailDivider() {
   if (!els.listDetailDivider) return;
 
-  const saved = parseFloat(localStorage.getItem(LIST_DETAIL_SPLIT_KEY));
+  // --- Restore saved split (separate keys per orientation to avoid cross-talk) ---
+  function getParentFlexDir() {
+    return getComputedStyle(els.listDetailDivider.parentElement).flexDirection;
+  }
+
+  const isCol = getParentFlexDir() === 'row'; // vertical mode = col-resize
+  const saveKey = isCol ? LIST_DETAIL_SPLIT_V_KEY : LIST_DETAIL_SPLIT_KEY;
+  const saved = parseFloat(localStorage.getItem(saveKey));
   if (!Number.isNaN(saved) && saved > 15 && saved < 85) {
-    els.infoCard.style.height = saved + '%';
+    els.infoCard.style.flex = '0 0 ' + saved + '%';
   }
 
   let dragging = false;
-  let startY = 0;
-  let startDetailHeight = 0;
-  let paneBodyHeight = 0;
+  let isColDrag = false;
+  let startX = 0, startY = 0;
+  let startSize = 0;
+  let paneSize = 0;
 
   const onDown = (e) => {
     dragging = true;
+    isColDrag = getParentFlexDir() === 'row';
+    startX = e.clientX;
     startY = e.clientY;
-    startDetailHeight = els.infoCard.getBoundingClientRect().height;
-    paneBodyHeight = els.listDetailDivider.parentElement.getBoundingClientRect().height;
+    const parent = els.listDetailDivider.parentElement;
+    if (isColDrag) {
+      startSize = els.infoCard.getBoundingClientRect().width;
+      paneSize = parent.getBoundingClientRect().width;
+    } else {
+      startSize = els.infoCard.getBoundingClientRect().height;
+      paneSize = parent.getBoundingClientRect().height;
+    }
     els.listDetailDivider.classList.add('dragging');
-    document.body.classList.add('dragging-divider');
+    document.body.classList.add(isColDrag ? 'dragging-col-divider' : 'dragging-divider');
     e.preventDefault();
   };
 
   const onMove = (e) => {
     if (!dragging) return;
-    // Dragging up = details get taller; dragging down = details get shorter
-    const dy = startY - e.clientY;
-    let newH = startDetailHeight + dy;
-    const minH = 100;
-    const maxH = paneBodyHeight - 120 - 6; // reserve for file list
-    newH = Math.max(minH, Math.min(maxH, newH));
-    const pct = (newH / paneBodyHeight) * 100;
-    els.infoCard.style.height = pct + '%';
+    if (isColDrag) {
+      // Vertical mode: drag left = details get wider
+      const dx = startX - e.clientX;
+      let newW = startSize + dx;
+      const minW = 240;
+      const maxW = Math.max(minW, paneSize - 240 - 6); // list-main min 240px
+      newW = Math.max(minW, Math.min(maxW, newW));
+      const pct = (newW / paneSize) * 100;
+      els.infoCard.style.flex = '0 0 ' + pct + '%';
+    } else {
+      // Horizontal mode: drag up = details get taller
+      const dy = startY - e.clientY;
+      let newH = startSize + dy;
+      const minH = 100;
+      const maxH = paneSize - 120 - 6; // list-main min 120px
+      newH = Math.max(minH, Math.min(maxH, newH));
+      const pct = (newH / paneSize) * 100;
+      els.infoCard.style.flex = '0 0 ' + pct + '%';
+    }
     renderer?.resize();
   };
 
@@ -748,9 +787,14 @@ function initListDetailDivider() {
     if (!dragging) return;
     dragging = false;
     els.listDetailDivider.classList.remove('dragging');
-    document.body.classList.remove('dragging-divider');
-    const pct = (els.infoCard.getBoundingClientRect().height / els.listDetailDivider.parentElement.getBoundingClientRect().height) * 100;
-    localStorage.setItem(LIST_DETAIL_SPLIT_KEY, pct.toFixed(1));
+    document.body.classList.remove('dragging-divider', 'dragging-col-divider');
+    const parent = els.listDetailDivider.parentElement;
+    const col = getParentFlexDir() === 'row';
+    const pct = col
+      ? (els.infoCard.getBoundingClientRect().width / parent.getBoundingClientRect().width) * 100
+      : (els.infoCard.getBoundingClientRect().height / parent.getBoundingClientRect().height) * 100;
+    const key = col ? LIST_DETAIL_SPLIT_V_KEY : LIST_DETAIL_SPLIT_KEY;
+    localStorage.setItem(key, pct.toFixed(1));
   };
 
   els.listDetailDivider.addEventListener('mousedown', onDown);
@@ -760,19 +804,20 @@ function initListDetailDivider() {
   // Touch
   els.listDetailDivider.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) return;
-    onDown({ clientY: e.touches[0].clientY, preventDefault: () => e.preventDefault() });
+    onDown({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, preventDefault: () => e.preventDefault() });
   }, { passive: false });
   document.addEventListener('touchmove', (e) => {
     if (!dragging || e.touches.length !== 1) return;
-    onMove({ clientY: e.touches[0].clientY });
+    onMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
   }, { passive: true });
   document.addEventListener('touchend', onUp);
   document.addEventListener('touchcancel', onUp);
 
   // Double-click to reset
   els.listDetailDivider.addEventListener('dblclick', () => {
-    els.infoCard.style.height = '30%';
-    localStorage.setItem(LIST_DETAIL_SPLIT_KEY, '30');
+    els.infoCard.style.flex = ''; // back to CSS default (flex: 1 1 0, equal sharing)
+    const col = getParentFlexDir() === 'row';
+    localStorage.removeItem(col ? LIST_DETAIL_SPLIT_V_KEY : LIST_DETAIL_SPLIT_KEY);
     renderer?.resize();
   });
 }
