@@ -7,10 +7,10 @@ Visualize your Google Drive storage like WinDirStat. See what's eating your spac
 ## Features
 
 - **Treemap visualization** — every file is a cell sized by bytes, colored by type
-- **File list with details pane** — sort, search, delete, open in Drive
+- **File list with details pane** — sort, search, open in Drive
 - **Fast** — Canvas 2D rendering, spatial hit-testing, handles 100k+ files
 - **Local-first** — scan runs in a Web Worker, cached in IndexedDB, no server
-- **Private** — uses `drive.file` OAuth scope, sees only what you've shared with the app
+- **Private** — uses the read-only Drive metadata OAuth scope; never reads file contents or modifies files
 - **Responsive** — desktop split view, mobile app shell with slide-up details
 - **Light/dark theme** — follows system preference, remembered across sessions
 - **Zero dependencies** — vanilla JS modules, no build step

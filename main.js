@@ -8,14 +8,10 @@ import { CLIENT_ID as CFG_CLIENT_ID } from './config.js';
 // config.js and paste your Google OAuth client ID there.
 const CLIENT_ID = (CFG_CLIENT_ID || '').trim();
 // drive.metadata.readonly — metadata only (name, size, parents, mime). We
-// never fetch file contents. drive.file wouldn't work here: that scope only
-// exposes files the app itself created/opened, not the user's existing Drive.
+// never fetch file contents, modify files, or delete files. drive.file wouldn't
+// work here: that scope only exposes files the app itself created/opened, not
+// the user's existing Drive.
 const SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
-// Derived capability flag — true only when the scope grants write access.
-// Controls visibility of Move to Trash. To enable write ops, switch SCOPE
-// to 'https://www.googleapis.com/auth/drive' (also restricted) and this
-// flag will flip automatically.
-const CAN_WRITE = SCOPE.endsWith('/auth/drive') || SCOPE.endsWith('/drive.file');
 const DIVIDER_STORAGE_KEY = 'ds_list_pane_height_pct';
 const LEFT_PANE_WIDTH_KEY = 'ds_left_pane_width_pct';
 const LIST_DETAIL_SPLIT_KEY = 'ds_list_detail_split_pct';
@@ -55,7 +51,6 @@ const els = {
   infoCardBody: $('info-card-body'),
   infoCardActions: $('info-card-actions'),
   btnOpenDrive: $('btn-open-drive'),
-  btnDelete: $('btn-delete'),
   btnCloseDetails: $('btn-close-details'),
   mobileTabs: $('mobile-tabs'),
   canvas: $('treemap'),
@@ -64,12 +59,6 @@ const els = {
   cookieNotice: $('cookie-notice'),
   cookieAccept: $('cookie-accept'),
 };
-
-// Hide write-only UI (Move to Trash) when the current OAuth scope can't perform
-// writes. Flip SCOPE to /auth/drive to bring it back.
-if (!CAN_WRITE && els.btnDelete) {
-  els.btnDelete.style.display = 'none';
-}
 
 let accessToken = sessionStorage.getItem('ds_access_token');
 let tokenClient = null;
@@ -455,7 +444,6 @@ function showInfoCard(node) {
   els.infoCardActions.classList.toggle('hidden', !canAct);
   if (canAct) {
     els.btnOpenDrive.textContent = node.isFolder ? 'Open folder in Drive' : 'Open in Drive';
-    els.btnDelete.textContent = node.isFolder ? 'Move folder to Trash' : 'Move to Trash';
   }
   // On mobile, pop the details sheet open
   if (isMobileView()) els.infoCard.classList.add('sheet-open');
@@ -956,43 +944,6 @@ els.btnOpenDrive.addEventListener('click', () => {
     : `https://drive.google.com/file/d/${selectedNode.id}/view`;
   window.open(url, '_blank');
 });
-els.btnDelete.addEventListener('click', async () => {
-  if (!selectedNode?.id || selectedNode.id === '___other___' || selectedNode.id === 'root') {
-    toast('Cannot delete this item.', 'error');
-    return;
-  }
-  if (!confirm(`Move "${selectedNode.name}" to Google Drive trash?`)) return;
-  try {
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${selectedNode.id}`, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ trashed: true }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const name = selectedNode.name;
-    removeNodeFromTree(currentTree, selectedNode.id);
-    hideInfoCard();
-    renderer.render();
-    renderList();
-    toast(`Moved "${name}" to trash`, 'success');
-  } catch (err) {
-    toast('Delete failed: ' + err.message, 'error');
-  }
-});
-
-function removeNodeFromTree(node, id) {
-  if (!node.children) return false;
-  const idx = node.children.findIndex(c => c.id === id);
-  if (idx >= 0) { node.children.splice(idx, 1); return true; }
-  for (const child of node.children) {
-    if (removeNodeFromTree(child, id)) return true;
-  }
-  return false;
-}
-
 // === Export ===
 function doExport() {
   if (!currentTree) return;
