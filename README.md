@@ -68,9 +68,9 @@ Scan traversal uses `files.list` with `pageSize=1000` and parallel page fetches.
 
 ## Privacy
 
-- OAuth scope: `drive.file` — only files you've created with this app or explicitly opened via the Drive picker. This app uses the full `drive.readonly`-equivalent behavior only for metadata you've granted.
+- OAuth scope: `drive.metadata.readonly` — read-only metadata access for building the Drive storage treemap.
 - No analytics, no tracking, no cookies.
-- All state is in browser `localStorage` and `IndexedDB`. Sign out clears tokens.
+- OAuth tokens are kept in tab-scoped `sessionStorage`; scanned metadata is cached in `IndexedDB`; UI preferences are stored in `localStorage`. Sign out clears tokens and cached scan data.
 - See [privacy.html](./privacy.html) and [terms.html](./terms.html) for full policy.
 
 ## Development

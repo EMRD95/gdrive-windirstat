@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Privacy Policy — DriveStat</title>
+<title>Privacy Policy, DriveStat</title>
 <meta name="description" content="DriveStat privacy policy. We don't collect, transmit, or store your Google Drive data. Everything runs in your browser.">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
@@ -79,12 +79,15 @@
     <ul>
       <li>
         <code>https://www.googleapis.com/auth/drive.metadata.readonly</code> — read-only
-        access to file metadata (name, size, mime type, parents, modified time).
-        DriveStat uses this to build the treemap. We never request or receive file
-        contents, thumbnails, or previews.
+        access to file metadata. DriveStat uses this to build the treemap.
+        We never request or receive file contents, thumbnails, or previews.
       </li>
     </ul>
-    <p>DriveStat reads only <strong>metadata</strong> (filenames, sizes, MIME types, timestamps, folder structure). It does not:</p>
+    <p>
+      DriveStat reads only <strong>metadata</strong>: file and folder IDs, names,
+      MIME types, parent folder relationships, file sizes/quota bytes, modified
+      timestamps, shared/owned status, Drive ID, and trash status. It does not:
+    </p>
     <ul>
       <li>Download the contents of your files</li>
       <li>Upload, copy, or transmit your files to any server we control</li>
@@ -97,12 +100,15 @@
       Everything is kept in your browser. Specifically:
     </p>
     <ul>
-      <li><strong>IndexedDB</strong> — caches the scanned file index so rescanning is optional on return visits.</li>
-      <li><strong>localStorage</strong> — stores UI preferences (theme, pane layout), the cookie/storage acknowledgement flag, and the short-lived Google OAuth access token issued by Google's identity library for the duration of your session.</li>
+      <li><strong>IndexedDB</strong> — caches the scanned Drive metadata index so rescanning is optional on return visits.</li>
+      <li><strong>sessionStorage</strong> — stores the short-lived Google OAuth access token for the current tab session only. Tokens are not persisted to localStorage, cookies, IndexedDB, or any server.</li>
+      <li><strong>localStorage</strong> — stores UI preferences (theme, pane layout) and the cookie/storage acknowledgement flag only.</li>
     </ul>
     <p>
       Clearing your browser's site data for <code>drivestat.em95.org</code> deletes all of the
-      above. You can also sign out from the app header, which revokes the in-browser token.
+      above. Because tokens are tab-session only, closing the tab or opening DriveStat
+      in a new tab requires signing in again. You can also sign out from the app header,
+      which revokes the in-browser token.
       To fully revoke DriveStat's access to your Google account, visit your
       <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google account permissions page</a>.
     </p>
@@ -149,6 +155,7 @@
     </p>
     <ul>
       <li>Sign out from DriveStat (clears the in-browser token).</li>
+      <li>Close the current tab (clears the tab-scoped session token).</li>
       <li>Clear site data for <code>drivestat.em95.org</code> in your browser's settings.</li>
       <li>Revoke DriveStat from your Google account at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
     </ul>

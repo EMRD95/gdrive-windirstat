@@ -75,7 +75,8 @@
   ├── Sign-in popup .....................  accounts.google.com
   ├── Drive metadata requests ...........  www.googleapis.com (direct, over TLS)
   ├── Scanned tree cache ................  IndexedDB (in-browser)
-  └── Access token + preferences ........  localStorage (in-browser)</code></pre>
+  ├── OAuth access token ................  sessionStorage (tab-session only)
+  └── UI preferences ....................  localStorage (in-browser)</code></pre>
     <p>
       There is no server-side component under developer control. GitHub Pages is
       a static file host; it serves the same HTML/CSS/JS bytes to every visitor
@@ -112,11 +113,11 @@
         surface is incompatible with "show me where all my storage is going" —
         the user would have to hand-pick the very files they're trying to
         discover.</li>
-      <li><strong>What fields are read?</strong> <code>name</code>, <code>mimeType</code>,
-        <code>parents</code>, <code>size</code>, <code>quotaBytesUsed</code>,
-        <code>modifiedTime</code>, <code>ownedByMe</code>, <code>driveId</code>,
-        <code>trashed</code>. File contents, thumbnails, and previews are never
-        requested.</li>
+      <li><strong>What fields are read?</strong> <code>id</code>, <code>name</code>,
+        <code>mimeType</code>, <code>parents</code>, <code>size</code>,
+        <code>quotaBytesUsed</code>, <code>trashed</code>, <code>modifiedTime</code>,
+        <code>ownedByMe</code>, <code>shared</code>, and <code>driveId</code>.
+        File contents, thumbnails, and previews are never requested.</li>
       <li><strong>Can the app modify user files?</strong> No. <code>drive.metadata.readonly</code>
         does not grant write access, and the codebase contains no mutation calls.</li>
     </ul>
@@ -127,9 +128,11 @@
       nowhere else:
     </p>
     <ul>
-      <li><strong>OAuth access token</strong> — <code>localStorage</code> key
+      <li><strong>OAuth access token</strong> — <code>sessionStorage</code> key
         <code>ds_access_token</code>. Short-lived token issued by Google
-        Identity Services for the current session; cleared on sign-out.</li>
+        Identity Services for the current tab session; cleared on sign-out,
+        tab close, or browser session end. It is not persisted to
+        <code>localStorage</code>, cookies, IndexedDB, or any server.</li>
       <li><strong>Scanned file metadata</strong> — IndexedDB database
         <code>DriveStatDB</code>, object store <code>files</code>. Caches the
         scan so repeat visits don't re-enumerate. Cleared by signing out or
@@ -178,10 +181,11 @@
         <a href="https://github.com/EMRD95/gdrive-windirstat" target="_blank" rel="noopener">github.com/EMRD95/gdrive-windirstat</a>.
         The deploy workflow (<code>.github/workflows/deploy.yml</code>) ships
         only the static files in the repo; there is no server build step.</li>
-      <li>Open DevTools → Application → Storage. The token and cached scan are
-        visible in <code>localStorage</code> and IndexedDB respectively, both
-        scoped to the <code>drivestat.em95.org</code> origin. Signing out clears
-        both.</li>
+      <li>Open DevTools → Application → Storage. The token is visible in
+        <code>sessionStorage</code>; the cached scan is visible in IndexedDB;
+        UI preferences are visible in <code>localStorage</code>. All are scoped
+        to the <code>drivestat.em95.org</code> origin. Signing out clears the
+        token and cached scan; closing the tab clears the token.</li>
     </ol>
 
     <h2 id="casa">CASA applicability</h2>

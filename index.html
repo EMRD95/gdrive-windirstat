@@ -245,7 +245,7 @@
   <div id="cookie-notice" class="cookie-notice hidden" role="dialog" aria-label="Storage notice">
     <div class="cookie-notice-body">
       <strong>We use browser storage, not cookies.</strong>
-      DriveStat keeps your preferences (theme, layout) and a cache of your scanned Drive index in your browser's local storage. No tracking, no analytics, nothing sent to our servers.
+      DriveStat keeps your preferences in localStorage, your scanned Drive metadata cache in IndexedDB, and your OAuth token only in tab-scoped sessionStorage. No tracking, no analytics, nothing sent to our servers.
       <a href="privacy.html">Learn more</a>
     </div>
     <button id="cookie-accept" class="btn-primary" type="button">Got it</button>
