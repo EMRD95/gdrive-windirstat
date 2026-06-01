@@ -48,6 +48,7 @@
         <li><a href="#who">Who we are</a></li>
         <li><a href="#data">What data we access</a></li>
         <li><a href="#storage">Where it's stored</a></li>
+        <li><a href="#security">How we protect Google user data</a></li>
         <li><a href="#google">Google API Services disclosure</a></li>
         <li><a href="#thirdparty">Third parties</a></li>
         <li><a href="#rights">Your rights & deletion</a></li>
@@ -108,9 +109,53 @@
       Clearing your browser's site data for <code>drivestat.em95.org</code> deletes all of the
       above. Because tokens are tab-session only, closing the tab or opening DriveStat
       in a new tab requires signing in again. You can also sign out from the app header,
-      which revokes the in-browser token.
+      which clears the in-browser token and cached Drive metadata from this browser.
       To fully revoke DriveStat's access to your Google account, visit your
       <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google account permissions page</a>.
+    </p>
+
+    <h2 id="security">How we protect Google user data</h2>
+    <p>
+      DriveStat treats the OAuth access token and cached Drive metadata as sensitive Google user data.
+      The app uses the following protection mechanisms:
+    </p>
+    <ul>
+      <li>
+        <strong>No server-side collection.</strong> DriveStat is a static client-side app.
+        Your OAuth token and Drive metadata are not uploaded to, stored on, or processed by
+        any application server we control.
+      </li>
+      <li>
+        <strong>Encrypted transport.</strong> DriveStat is served over HTTPS, and Google Identity
+        Services / Google Drive API calls are made directly from your browser to Google over HTTPS/TLS.
+      </li>
+      <li>
+        <strong>Least-privilege, read-only access.</strong> DriveStat requests only the
+        <code>drive.metadata.readonly</code> scope and requests only the metadata fields needed to
+        display storage usage. The app cannot edit, trash, delete, upload, copy, or download file contents.
+      </li>
+      <li>
+        <strong>Browser-isolated local storage.</strong> Cached Drive metadata stays in IndexedDB
+        scoped to the <code>drivestat.em95.org</code> origin. The Google OAuth access token is kept
+        only in tab-scoped <code>sessionStorage</code> and is not written to cookies,
+        <code>localStorage</code>, IndexedDB, or any server.
+      </li>
+      <li>
+        <strong>Reduced exfiltration surface.</strong> The app does not include analytics, ad networks,
+        session recorders, or cross-site trackers. The main app page uses a Content Security Policy that
+        restricts scripts and network connections to DriveStat, Google Identity Services, and the Google Drive API.
+      </li>
+      <li>
+        <strong>User-controlled deletion and revocation.</strong> Signing out clears the in-browser
+        access token and cached Drive metadata. Clearing site data removes all local DriveStat data, and
+        you can revoke DriveStat's Google access at any time from your Google account permissions page.
+      </li>
+    </ul>
+    <p>
+      Because the Drive metadata cache stays on your device, its at-rest protection is provided by
+      your browser's same-origin storage isolation and your device, operating-system, and browser
+      security controls. DriveStat does not maintain an application database or server-side backups
+      of your Google Drive metadata.
     </p>
 
     <h2 id="google">Google API Services disclosure</h2>
@@ -154,7 +199,7 @@
       delete on our side. To delete your locally cached data:
     </p>
     <ul>
-      <li>Sign out from DriveStat (clears the in-browser token).</li>
+      <li>Sign out from DriveStat (clears the in-browser token and cached Drive metadata from this browser).</li>
       <li>Close the current tab (clears the tab-scoped session token).</li>
       <li>Clear site data for <code>drivestat.em95.org</code> in your browser's settings.</li>
       <li>Revoke DriveStat from your Google account at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
